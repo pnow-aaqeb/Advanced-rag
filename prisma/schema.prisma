@@ -1,0 +1,2135 @@
+generator client {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model MessageType {
+  id      String        @id @db.Uuid
+  name    MessageSource @unique
+  sources sources[]
+}
+
+model Thread {
+  id                         String                       @id @db.Uuid
+  thread_context_id          String                       @unique @db.Uuid
+  context_hash               String                       @unique @db.Char(64)
+  thread_summary_id          String                       @db.Uuid
+  conversation_id            String
+  domain                     String
+  message_db_ids             String[]
+  ms_message_id              String[]
+  summary                    Json?
+  created_at                 DateTime                     @default(now())
+  last_updated_at            DateTime
+  thread_context             thread_context               @relation(fields: [thread_context_id, context_hash], references: [id, context_hash])
+  thread_summary             thread_summary               @relation(fields: [thread_summary_id], references: [id])
+  ThreadToThreadParticipants ThreadToThreadParticipants[]
+  thread_messages            thread_messages[]
+
+  @@index([context_hash])
+  @@index([conversation_id])
+  @@index([domain, conversation_id])
+  @@index([domain])
+  @@index([message_db_ids], type: Gin)
+  @@index([ms_message_id], type: Gin)
+  @@index([thread_context_id])
+  @@unique([thread_context_id, context_hash])
+}
+
+model DocumentSharedWithUsers {
+  A         String    @db.Uuid
+  B         String    @db.Uuid
+  documents documents @relation(fields: [A], references: [id], onDelete: Cascade)
+  users     users     @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_DocumentSharedWithUsers_AB_pkey")
+  @@index([B], map: "_DocumentSharedWithUsers_B_index")
+  @@map("_DocumentSharedWithUsers")
+}
+
+model FolderMessageToMessage {
+  A               String          @db.Uuid
+  B               String          @db.Uuid
+  folder_messages folder_messages @relation(fields: [A], references: [id], onDelete: Cascade)
+  messages        messages        @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_FolderMessageToMessage_AB_pkey")
+  @@index([B], map: "_FolderMessageToMessage_B_index")
+  @@map("_FolderMessageToMessage")
+}
+
+model ThreadToThreadParticipants {
+  A                   String              @db.Uuid
+  B                   String              @db.Uuid
+  Thread              Thread              @relation(fields: [A], references: [id], onDelete: Cascade)
+  thread_participants thread_participants @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_ThreadToThreadParticipants_AB_pkey")
+  @@index([B], map: "_ThreadToThreadParticipants_B_index")
+  @@map("_ThreadToThreadParticipants")
+}
+
+model candidate_to_keywords {
+  A          String     @db.Uuid
+  B          Bytes
+  candidates candidates @relation(fields: [A], references: [id], onDelete: Cascade)
+  keywords   keywords   @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_candidate_to_keywords_AB_pkey")
+  @@index([B], map: "_candidate_to_keywords_B_index")
+  @@map("_candidate_to_keywords")
+}
+
+model certification_to_keywords {
+  A              String         @db.Uuid
+  B              Bytes
+  certifications certifications @relation(fields: [A], references: [id], onDelete: Cascade)
+  keywords       keywords       @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_certification_to_keywords_AB_pkey")
+  @@index([B], map: "_certification_to_keywords_B_index")
+  @@map("_certification_to_keywords")
+}
+
+model job_role_to_keywords {
+  A         String    @db.Uuid
+  B         Bytes
+  job_roles job_roles @relation(fields: [A], references: [id], onDelete: Cascade)
+  keywords  keywords  @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_job_role_to_keywords_AB_pkey")
+  @@index([B], map: "_job_role_to_keywords_B_index")
+  @@map("_job_role_to_keywords")
+}
+
+model license_to_keywords {
+  A        Bytes
+  B        String   @db.Uuid
+  keywords keywords @relation(fields: [A], references: [id], onDelete: Cascade)
+  licenses licenses @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_license_to_keywords_AB_pkey")
+  @@index([B], map: "_license_to_keywords_B_index")
+  @@map("_license_to_keywords")
+}
+
+model position_to_keywords {
+  A         Bytes
+  B         String    @db.Uuid
+  keywords  keywords  @relation(fields: [A], references: [id], onDelete: Cascade)
+  positions positions @relation(fields: [B], references: [id], onDelete: Cascade)
+
+  @@id([A, B], map: "_position_to_keywords_AB_pkey")
+  @@index([B], map: "_position_to_keywords_B_index")
+  @@map("_position_to_keywords")
+}
+
+model agreements {
+  id                String    @id @db.Uuid
+  location          String?
+  date_signed       DateTime?
+  payment_terms     Float?
+  airtable_metadata Json?
+  contact_id        String?   @db.Uuid
+  company_id        String    @unique @db.Uuid
+  created_by        String?
+  created_at        DateTime  @default(now())
+  last_updated_by   String?
+  last_updated_at   DateTime
+  is_deleted        Boolean   @default(false)
+  deleted_at        DateTime?
+  deleted_by        String?
+  companies         companies @relation(fields: [company_id], references: [id])
+}
+
+model api_keys {
+  id                    String                 @id
+  name                  String
+  key                   String                 @unique
+  scope                 String[]
+  expires_at            DateTime?
+  last_used_at          DateTime?
+  created_at            DateTime               @default(now())
+  last_updated_at       DateTime
+  tenant_id             String?                @db.Uuid
+  tenant_config_id      String?                @db.Uuid
+  tenant_configurations tenant_configurations? @relation(fields: [tenant_config_id, tenant_id], references: [id, tenant_id])
+
+  @@index([tenant_id])
+}
+
+model attachments {
+  id                 String    @id @db.Uuid
+  receiver_emails    String[]
+  sender_emails      String[]
+  ms_message_id      String[]
+  content            Bytes
+  document_url       String    @unique
+  content_hash       String    @unique
+  normalized_content String
+  content_full       String
+  document_id        String    @unique @db.Uuid
+  documents          documents @relation(fields: [document_id, document_url, content_hash, normalized_content, content, content_full], references: [id, url, content_hash, normalized_content, content, content_full])
+
+  @@unique([document_id, document_url, content_hash, normalized_content, content, content_full])
+  @@index([document_id])
+}
+
+model attributes {
+  id              String            @id @db.Uuid
+  name            String
+  type            String
+  description     String?
+  tenant_id       String
+  user_id         String
+  version         Float             @default(1.0)
+  created_by      String?
+  created_at      DateTime          @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  is_deleted      Boolean           @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  user_attributes user_attributes[]
+
+  @@index([created_at])
+  @@index([is_deleted, deleted_at])
+  @@index([last_updated_at])
+  @@index([name, type])
+  @@index([tenant_id])
+  @@index([user_id])
+}
+
+model audit_logs {
+  id          String   @id @db.Uuid
+  tenant_id   String
+  resource_id String?
+  user_id     String?
+  action      String
+  details     Json
+  metadata    Json?
+  timestamp   DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([resource_id, tenant_id])
+  @@index([tenant_id])
+}
+
+model boolean_strings {
+  id              String                  @id @db.Uuid
+  string          String
+  jd              String
+  upvote          Int                     @default(0)
+  downvote        Int                     @default(0)
+  entity_id       String                  @db.Uuid
+  entity_type     BooleanStringEntityType
+  created_by      String?
+  created_at      DateTime                @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  deleted_at      DateTime?
+  deleted_by      String?
+
+  @@index([entity_id, upvote(sort: Desc)])
+  @@index([jd])
+}
+
+model candidate_source_options {
+  id                 String       @id @db.Uuid
+  field_display_name String       @default("candidate_source")
+  color              String?      @db.VarChar(32)
+  color_hex          String?      @db.Char(6)
+  value              String       @unique
+  created_by         String       @default("system")
+  created_at         DateTime     @default(now())
+  candidates         candidates[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model candidate_status_single_select {
+  id                 String             @id @db.Uuid
+  field_type         FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("candidate_status")
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  key                String             @unique
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  candidates         candidates[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model candidate_submission_status {
+  id                    String                  @id @db.Uuid
+  field_type            FrontendFieldTypes      @default(SINGLE_SELECT)
+  field_display_name    String                  @default("company_status")
+  color                 String?                 @db.VarChar(32)
+  color_hex             String?                 @db.Char(6)
+  value                 String                  @unique
+  created_by            String                  @default("system")
+  created_at            DateTime                @default(now())
+  candidate_submissions candidate_submissions[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model candidate_submissions {
+  id                          String                      @id @db.Uuid
+  status                      String
+  submitted_at                DateTime                    @default(now())
+  submitted_by                String                      @db.Uuid
+  last_updated_by             String?
+  last_updated_at             DateTime
+  deleted_at                  DateTime?
+  deleted_by                  String?
+  created_at                  DateTime                    @default(now())
+  created_by                  String?
+  candidate_full_name         String
+  candidate_id                String                      @db.Uuid
+  company_id                  String                      @db.Uuid
+  position_id                 String                      @db.Uuid
+  is_position_deleted         Boolean
+  is_company_deleted          Boolean
+  company_name                String
+  airtable_metadata           Json?
+  candidates                  candidates                  @relation(fields: [candidate_id, candidate_full_name], references: [id, candidate_full_name])
+  positions                   positions                   @relation(fields: [position_id, company_id, is_position_deleted, is_company_deleted, company_name], references: [id, company_id, is_deleted, is_company_deleted, company_name])
+  candidate_submission_status candidate_submission_status @relation(fields: [status], references: [value])
+  interviews                  interviews[]
+
+  @@unique([candidate_id, position_id])
+  @@unique([id, candidate_id, position_id, candidate_full_name])
+  @@unique([id, candidate_id, position_id])
+}
+
+model candidates {
+  id                             String                          @id @db.Uuid
+  is_remote                      Boolean?
+  total_work_experience          String?
+  search_location                String?
+  resume_text                    String?
+  url                            String?
+  status                         String?
+  personal_information_id        String                          @db.Uuid
+  sourced_from                   String
+  location_id                    String?                         @db.Uuid
+  candidate_full_name            String
+  created_by                     String?
+  created_at                     DateTime                        @default(now())
+  last_updated_by                String?
+  last_updated_at                DateTime
+  is_deleted                     Boolean                         @default(false)
+  deleted_at                     DateTime?
+  deleted_by                     String?
+  bdm_id                         String?
+  assignee_id                    String?
+  candidate_to_keywords          candidate_to_keywords[]
+  candidate_submissions          candidate_submissions[]
+  locations                      locations?                      @relation(fields: [location_id], references: [id])
+  personal_information           personal_information            @relation(fields: [personal_information_id, candidate_full_name], references: [id, full_name])
+  candidate_source_options       candidate_source_options        @relation(fields: [sourced_from], references: [value])
+  candidate_status_single_select candidate_status_single_select? @relation(fields: [status], references: [value])
+  certifications                 certifications[]
+  education                      education[]
+  licenses                       licenses[]
+  possible_job_roles             possible_job_roles[]
+  work_experiences               work_experiences[]
+
+  @@unique([id, candidate_full_name])
+  @@unique([personal_information_id, candidate_full_name])
+}
+
+model certifications {
+  id                        String                      @id @db.Uuid
+  name_of_certification     String
+  institution               String
+  candidate_id              String                      @db.Uuid
+  created_by                String?
+  created_at                DateTime                    @default(now())
+  last_updated_by           String?
+  last_updated_at           DateTime
+  deleted_at                DateTime?
+  deleted_by                String?
+  certification_to_keywords certification_to_keywords[]
+  candidates                candidates                  @relation(fields: [candidate_id], references: [id])
+}
+
+model comment_mentions {
+  id         String   @id @db.Uuid
+  comment_id String   @db.Uuid
+  user_id    String   @db.Uuid
+  created_at DateTime @default(now())
+  comments   comments @relation(fields: [comment_id], references: [id])
+  users      users    @relation(fields: [user_id], references: [id])
+
+  @@unique([comment_id, user_id])
+  @@index([comment_id])
+  @@index([user_id])
+}
+
+model comments {
+  id               String             @id @db.Uuid
+  text             String
+  table_name       String
+  parent_id        String?            @db.Uuid
+  record_id        String
+  created_by       String
+  created_at       DateTime           @default(now())
+  last_updated_by  String?
+  last_updated_at  DateTime
+  is_deleted       Boolean            @default(false)
+  deleted_at       DateTime?
+  deleted_by       String?
+  comment_mentions comment_mentions[]
+  comments         comments?          @relation("commentsTocomments", fields: [parent_id], references: [id])
+  other_comments   comments[]         @relation("commentsTocomments")
+
+  @@index([created_at])
+  @@index([last_updated_at])
+  @@index([parent_id])
+  @@index([record_id])
+}
+
+model companies {
+  id                           String                       @id @db.Uuid
+  name                         String
+  website                      String
+  domain                       String                       @unique
+  size                         String?
+  revenue                      String?
+  industry                     String?
+  created_by                   String?
+  created_at                   DateTime                     @default(now())
+  last_updated_by              String?
+  last_updated_at              DateTime
+  status                       String
+  is_deleted                   Boolean                      @default(false)
+  deleted_at                   DateTime?
+  deleted_by                   String?
+  organization_id              String?
+  careers_page                 String?
+  linkedin_url                 String?
+  raw_body                     Json?
+  airtable_metadata            Json?
+  research_analyst             String?                      @db.Uuid
+  recruiter_assignee_id        String?                      @db.Uuid
+  agreements                   agreements?
+  company_status_single_select company_status_single_select @relation(fields: [status], references: [value])
+  contacts                     contacts[]
+  leads                        leads[]
+  positions                    positions[]
+
+  @@unique([id, is_deleted, name, status])
+  @@unique([id, name])
+}
+
+model company_status_single_select {
+  id                 String             @id @db.Uuid
+  field_type         FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("company_status")
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  key                String             @unique
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  companies          companies[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model contacts {
+  id                         String                      @id @db.Uuid
+  name                       String
+  email                      String?                     @unique
+  phone                      String?
+  job_title                  String
+  linkedin                   String?
+  company_id                 String                      @db.Uuid
+  created_by                 String?
+  created_at                 DateTime                    @default(now())
+  last_updated_by            String?
+  last_updated_at            DateTime
+  is_deleted                 Boolean                     @default(false)
+  deleted_at                 DateTime?
+  deleted_by                 String?
+  apollo_id                  String?                     @unique
+  first_name                 String?
+  last_name                  String?
+  full_name                  String?
+  linkedin_url               String?
+  title                      String?
+  email_status               String?
+  photo_url                  String?
+  organization_id            String?                     @db.Uuid
+  location_id                String?                     @db.Uuid
+  departments                String[]
+  subdepartments             String[]
+  seniority                  String?
+  functions                  String[]
+  raw_body                   String?
+  airtable_metadata          Json?
+  companies                  companies                   @relation(fields: [company_id], references: [id])
+  email_status_single_select email_status_single_select? @relation(fields: [email_status], references: [value])
+  pocs                       pocs[]
+
+  @@unique([id, full_name])
+  @@unique([id, job_title])
+}
+
+model conversations {
+  id                 String            @id @db.Uuid
+  domain             String            @unique
+  threads            Json[]
+  created_at         DateTime          @default(now())
+  last_updated_at    DateTime
+  conversation_topic ConversationTopic
+
+  @@index([domain, conversation_topic])
+  @@index([domain, conversation_topic, last_updated_at(sort: Desc)])
+  @@index([domain])
+  @@index([domain, last_updated_at(sort: Desc)])
+}
+
+model custom_metric_values {
+  id                        String                    @id @db.Uuid
+  usage_metric_id           String                    @db.Uuid
+  name                      String
+  value                     Float                     @default(0.0)
+  unit                      String?
+  integration_usage_metrics integration_usage_metrics @relation(fields: [usage_metric_id], references: [id])
+
+  @@unique([usage_metric_id, name])
+}
+
+model deals {
+  id String @id @db.Uuid
+}
+
+model dkim_records {
+  id              String      @id @db.Uuid
+  domain_id       String      @unique @db.Uuid
+  dns_record_id   String      @unique @db.Uuid
+  selector        String
+  public_key      String
+  key_type        String      @default("rsa")
+  created_at      DateTime    @default(now())
+  last_updated_at DateTime
+  deleted_at      DateTime?
+  dns_records     dns_records @relation(fields: [dns_record_id, domain_id], references: [id, domain_id])
+
+  @@unique([dns_record_id, domain_id])
+  @@index([dns_record_id])
+}
+
+model dmarc_records {
+  id               String       @id @db.Uuid
+  domain_id        String       @unique @db.Uuid
+  dns_record_id    String       @unique @db.Uuid
+  policy           DMARCPolicy
+  subdomain_policy DMARCPolicy?
+  percentage       Int          @default(100)
+  report_format    String[]
+  report_interval  Int          @default(86400)
+  report_uris      String[]
+  created_at       DateTime     @default(now())
+  last_updated_at  DateTime
+  deleted_at       DateTime?
+  dns_records      dns_records  @relation(fields: [dns_record_id, domain_id], references: [id, domain_id])
+
+  @@unique([dns_record_id, domain_id])
+  @@index([dns_record_id])
+}
+
+model dns_records {
+  id              String         @id @db.Uuid
+  domain_id       String         @db.Uuid
+  type            DNSRecordType
+  name            String
+  value           String
+  ttl             Int            @default(3600)
+  priority        Int?
+  created_at      DateTime       @default(now())
+  last_updated_at DateTime
+  deleted_at      DateTime?
+  dkim_records    dkim_records?
+  dmarc_records   dmarc_records?
+  domains         domains        @relation(fields: [domain_id], references: [id])
+  spf_records     spf_records?
+
+  @@unique([domain_id, type, name])
+  @@unique([id, domain_id])
+  @@index([domain_id])
+  @@index([type])
+}
+
+model documents {
+  id                      String                    @id @db.Uuid
+  name                    String
+  is_attachment           Boolean                   @default(false)
+  filename                String
+  file_extension          String
+  mime_type               String
+  charset                 String?
+  size                    BigInt
+  url                     String
+  content                 Bytes
+  content_full            String
+  summary                 String?
+  keywords                String[]
+  normalized_content      String                    @unique
+  content_hash            String                    @unique @db.Char(64)
+  thumbnail               Bytes?
+  thumbnail_type          String?
+  preview_text            String?
+  page_count              Int?
+  is_confidential         Boolean?                  @default(false)
+  classification          DocumentClassification?
+  uploaded_by_id          String                    @db.Uuid
+  uploaded_by_email       String
+  uploaded_by_first_name  String
+  uploaded_by_last_name   String
+  uploaded_date           DateTime                  @default(now())
+  view_count              Int                       @default(0)
+  download_count          Int                       @default(0)
+  last_viewed             DateTime?
+  last_edited             DateTime?
+  DocumentSharedWithUsers DocumentSharedWithUsers[]
+  attachments             attachments?
+  users                   users                     @relation(fields: [uploaded_by_id, uploaded_by_email, uploaded_by_first_name, uploaded_by_last_name], references: [id, email, first_name, last_name])
+  positions               positions[]
+
+  @@unique([id, filename, mime_type, url, thumbnail, classification])
+  @@unique([id, url, content_hash, normalized_content, content, content_full])
+  @@index([classification])
+  @@index([classification, uploaded_date(sort: Desc)])
+  @@index([file_extension])
+  @@index([file_extension, size(sort: Desc)])
+  @@index([file_extension, view_count(sort: Desc)])
+  @@index([is_confidential, classification])
+  @@index([keywords], type: Gin)
+  @@index([last_viewed(sort: Desc), classification])
+  @@index([last_viewed])
+  @@index([normalized_content])
+  @@index([uploaded_by_email, file_extension])
+  @@index([uploaded_by_email])
+  @@index([uploaded_by_email, last_edited(sort: Desc)])
+  @@index([uploaded_date(sort: Desc)])
+}
+
+model domains {
+  id                    String                 @id @db.Uuid
+  name                  String                 @unique
+  description           String?
+  status                DomainStatus           @default(PENDING)
+  mail_type             MailType
+  tenant_id             String?                @db.Uuid
+  tenant_config_id      String?                @db.Uuid
+  created_at            DateTime               @default(now())
+  last_updated_at       DateTime
+  deleted_at            DateTime?
+  dns_records           dns_records[]
+  tenant_configurations tenant_configurations? @relation(fields: [tenant_config_id, tenant_id], references: [id, tenant_id])
+
+  @@index([deleted_at])
+  @@index([status])
+  @@index([tenant_id])
+  @@index([tenant_id, status])
+}
+
+model education {
+  id              String     @id @db.Uuid
+  primary         String?
+  secondary       String?
+  graduation      String?
+  post_graduation String?
+  phd             String?
+  candidate_id    String     @db.Uuid
+  created_by      String?
+  created_at      DateTime   @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  is_deleted      Boolean    @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  candidates      candidates @relation(fields: [candidate_id], references: [id])
+}
+
+model email_action_history {
+  id                         String                @id @db.Uuid
+  action_taken_by            String                @db.Uuid
+  action                     String
+  action_description         String
+  date                       DateTime              @db.Date
+  time                       DateTime              @db.Time(6)
+  requires_follow_up         Boolean               @default(false)
+  metadata                   Json?
+  next_action_id             String?               @unique @db.Uuid
+  thread_id                  String?               @db.Uuid
+  message_id                 String?               @db.Uuid
+  email_action_history       email_action_history? @relation("email_action_historyToemail_action_history", fields: [next_action_id], references: [id])
+  other_email_action_history email_action_history? @relation("email_action_historyToemail_action_history")
+
+  @@index([action_taken_by])
+  @@index([action_taken_by, requires_follow_up, time(sort: Desc)])
+  @@index([message_id])
+  @@index([message_id, requires_follow_up, time(sort: Desc)])
+  @@index([next_action_id])
+  @@index([thread_id])
+  @@index([thread_id, requires_follow_up, time(sort: Desc)])
+}
+
+model email_preference {
+  id                    String                @id @db.Uuid
+  tenant_id             String                @unique @db.Uuid
+  microsoft_graph       Boolean               @default(false)
+  send_grid             Boolean               @default(false)
+  created_at            DateTime              @default(now())
+  last_updated_at       DateTime?
+  tenant_configurations tenant_configurations @relation(fields: [tenant_id], references: [tenant_id])
+
+  @@index([tenant_id, microsoft_graph])
+  @@index([tenant_id, send_grid])
+}
+
+model email_servers {
+  id                    String                @id @db.Uuid
+  host                  String
+  port                  Int
+  username              String
+  password              String
+  is_secure             Boolean               @default(true)
+  is_system_managed     Boolean               @default(false)
+  server_type           EmailServerType
+  smtp_status           SMTPStatus?
+  created_at            DateTime              @default(now())
+  last_updated_at       DateTime
+  deleted_at            DateTime?
+  tenant_id             String                @db.Uuid
+  tenant_config_id      String                @db.Uuid
+  tenant_configurations tenant_configurations @relation(fields: [tenant_config_id, tenant_id], references: [id, tenant_id])
+
+  @@unique([server_type, host, username])
+  @@index([server_type])
+  @@index([tenant_config_id])
+  @@index([tenant_id, server_type])
+  @@index([tenant_id, server_type, username])
+  @@index([tenant_id, username])
+}
+
+model email_status_single_select {
+  id                 String     @id @db.Uuid
+  field_display_name String     @default("email_status")
+  color              String?    @db.VarChar(32)
+  color_hex          String?    @db.Char(6)
+  key                String     @unique
+  value              String     @unique
+  created_by         String     @default("system")
+  created_at         DateTime   @default(now())
+  contacts           contacts[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model external_integrations {
+  id                        String                      @id @db.Uuid
+  name                      IntegrationName
+  category                  IntegrationCategory
+  auth_strategy             AuthStrategy
+  config                    Json
+  credentials               Json
+  enabled                   Boolean                     @default(true)
+  tenant_id                 String                      @db.Uuid
+  tenant_config_id          String                      @db.Uuid
+  created_at                DateTime                    @default(now())
+  last_updated_at           DateTime
+  tenant_configurations     tenant_configurations       @relation(fields: [tenant_config_id, tenant_id], references: [id, tenant_id])
+  integration_credit_usage  integration_credit_usage[]
+  integration_notifications integration_notifications[]
+  integration_usage_metrics integration_usage_metrics[]
+
+  @@unique([id, tenant_id])
+  @@index([name, auth_strategy])
+  @@index([tenant_id, enabled])
+  @@index([tenant_id, name, category])
+}
+
+model field_references {
+  id              String        @id @db.Uuid
+  table_schema_id String        @db.Uuid
+  reference       String
+  table_schemas   table_schemas @relation(fields: [table_schema_id], references: [id], onDelete: Cascade)
+
+  @@index([table_schema_id])
+}
+
+model folder_messages {
+  id                     String                   @id @db.Uuid
+  user_id                String                   @db.Uuid
+  folder_key             String                   @unique
+  FolderMessageToMessage FolderMessageToMessage[]
+
+  @@unique([folder_key, user_id])
+}
+
+model folders {
+  id          String     @id @db.Uuid
+  name        String
+  description String?
+  color       String?    @db.VarChar(32)
+  color_hex   String?    @db.Char(6)
+  icon        String?
+  key         String     @unique
+  meta_data   Json?
+  default     Boolean    @default(false)
+  type        FolderType @default(INCOMING_FOLDER)
+  user_id     String     @db.Uuid
+  users       users      @relation(fields: [user_id], references: [id])
+
+  @@unique([id, key])
+  @@unique([user_id, key])
+  @@index([id])
+  @@index([user_id, key])
+}
+
+model frontend_configs {
+  id                String          @id @db.Uuid
+  additional_config Json?
+  tenant_config_id  String?         @db.Uuid
+  tenant_id         String?         @unique @db.Uuid
+  policy_id         String?         @db.Uuid
+  is_deleted        Boolean         @default(false)
+  table_schemas     table_schemas[]
+}
+
+model group_policies {
+  id              String       @id @db.Uuid
+  name            String
+  description     String?
+  configuration   Json
+  priority        Int
+  group_id        String?      @db.Uuid
+  user_group_id   String?      @db.Uuid
+  created_at      DateTime     @default(now())
+  last_updated_at DateTime
+  groups          groups?      @relation(fields: [group_id], references: [id])
+  user_groups     user_groups? @relation(fields: [user_group_id], references: [id])
+
+  @@index([group_id])
+  @@index([user_group_id])
+}
+
+model group_templates {
+  id              String   @id @db.Uuid
+  name            String   @unique
+  description     String?
+  attributes      Json
+  created_at      DateTime @default(now())
+  last_updated_at DateTime
+  groups          groups[]
+}
+
+model groups {
+  id              String           @id @db.Uuid
+  name            String
+  description     String?
+  template_id     String           @db.Uuid
+  parent_id       String?          @db.Uuid
+  created_at      DateTime         @default(now())
+  last_updated_at DateTime
+  group_policies  group_policies[]
+  groups          groups?          @relation("groupsTogroups", fields: [parent_id], references: [id])
+  other_groups    groups[]         @relation("groupsTogroups")
+  group_templates group_templates  @relation(fields: [template_id], references: [id])
+  user_groups     user_groups[]
+
+  @@index([parent_id])
+  @@index([template_id])
+}
+
+model integration_credit_usage {
+  id                    String                @id @db.Uuid
+  integration_id        String                @db.Uuid
+  credit_amount         Int
+  credit_type           String
+  description           String
+  timestamp             DateTime              @default(now())
+  operation_id          String?
+  operation_type        String?
+  external_integrations external_integrations @relation(fields: [integration_id], references: [id])
+
+  @@index([credit_type, timestamp])
+  @@index([integration_id, timestamp])
+}
+
+model integration_notifications {
+  id                    String                @id @db.Uuid
+  integration_id        String                @db.Uuid
+  type                  NotificationType
+  priority              NotificationPriority  @default(LOW)
+  channel               DeliveryChannel
+  title                 String
+  message               String
+  trigger_value         Float?
+  threshold             Float?
+  sent_at               DateTime              @default(now())
+  delivered_at          DateTime?
+  error                 String?
+  external_integrations external_integrations @relation(fields: [integration_id], references: [id])
+
+  @@index([integration_id, type])
+  @@index([priority, sent_at])
+  @@index([sent_at])
+}
+
+model integration_usage_metrics {
+  id                    String                   @id @db.Uuid
+  integration_id        String                   @db.Uuid
+  metric_type           MetricType
+  interval              ExtUsageTrackingInterval
+  request_count         Int                      @default(0)
+  error_count           Int                      @default(0)
+  latency_ms            Int?
+  limit_remaining       Int?
+  limit_reset_at        DateTime?
+  timestamp             DateTime                 @default(now())
+  custom_metric_values  custom_metric_values[]
+  external_integrations external_integrations    @relation(fields: [integration_id], references: [id])
+
+  @@index([integration_id, timestamp])
+  @@index([metric_type, timestamp])
+}
+
+model interview_attendees {
+  id                       String      @id @db.Uuid
+  other_external_attendees String[]
+  interviews               interviews?
+  users                    users[]
+}
+
+model interview_feedbacks {
+  id                 String             @id @db.Uuid
+  type               FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("interview_feedback")
+  icon               String?
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  interviews         interviews[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([type])
+  @@index([value])
+}
+
+model interview_modes {
+  id                 String             @id @db.Uuid
+  field_type         FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("interview_mode")
+  icon               String?
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  interviews         interviews[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([field_type])
+  @@index([value])
+}
+
+model interviews {
+  id                     String                @id @db.Uuid
+  host_user_id           String?               @db.Uuid
+  host_user_email        String?
+  start_time             DateTime
+  end_time               DateTime?
+  attendees_id           String?               @unique @db.Uuid
+  outlook_calendar_event Json?
+  interview_subject      String?
+  feedback               String?
+  candidate_id           String                @db.Uuid
+  submission_id          String                @db.Uuid
+  position_id            String                @db.Uuid
+  timezone_key           String
+  interview_mode         String
+  airtable_metadata      Json?
+  created_by             String?               @default("system")
+  created_at             DateTime              @default(now())
+  last_updated_by        String?
+  last_updated_at        DateTime
+  is_deleted             Boolean               @default(false)
+  deleted_at             DateTime?
+  deleted_by             String?
+  interview_attendees    interview_attendees?  @relation(fields: [attendees_id], references: [id])
+  interview_feedbacks    interview_feedbacks?  @relation(fields: [feedback], references: [value])
+  interview_modes        interview_modes       @relation(fields: [interview_mode], references: [value])
+  candidate_submissions  candidate_submissions @relation(fields: [submission_id, candidate_id, position_id], references: [id, candidate_id, position_id])
+  timezones              timezones             @relation(fields: [timezone_key], references: [key])
+
+  @@index([candidate_id])
+  @@index([end_time])
+  @@index([position_id])
+  @@index([start_time])
+}
+
+model job_roles {
+  id                            String                 @id @db.Uuid
+  title_hash                    Bytes                  @unique
+  title_display                 String                 @db.VarChar(120)
+  title_normalized              String                 @unique
+  role_description              String                 @db.VarChar(500)
+  job_role_description_detailed String
+  job_role_to_keywords          job_role_to_keywords[]
+  positions                     positions[]
+  work_experiences              work_experiences[]
+
+  @@unique([title_normalized, title_display, job_role_description_detailed])
+  @@index([job_role_description_detailed])
+  @@index([role_description])
+  @@index([title_hash], type: Hash)
+  @@index([title_normalized])
+}
+
+model keywords {
+  id                        Bytes                       @id
+  term                      String                      @db.VarChar(64)
+  term_hash                 Bytes                       @unique
+  normalized_term           String                      @unique
+  category                  TermCategory
+  term_type                 TermType
+  is_active                 Boolean                     @default(true)
+  created_at                DateTime                    @default(now())
+  created_by                String
+  updated_at                DateTime
+  updated_by                String?
+  deleted_at                DateTime?
+  deleted_by                String?
+  candidate_to_keywords     candidate_to_keywords[]
+  certification_to_keywords certification_to_keywords[]
+  job_role_to_keywords      job_role_to_keywords[]
+  license_to_keywords       license_to_keywords[]
+  position_to_keywords      position_to_keywords[]
+
+  @@index([category, term_type])
+  @@index([normalized_term])
+  @@index([term_hash])
+}
+
+model leads {
+  id                         String                     @id @db.Uuid
+  company_id                 String?                    @db.Uuid
+  company_name               String?
+  company_website            String?
+  version                    Float                      @default(1.0)
+  person_name                String?
+  linkedin                   String?
+  email                      String                     @unique
+  phone                      String?
+  status                     String
+  job_title                  String?
+  company_size               String?
+  revenue                    String?
+  industry                   String?
+  created_by                 String?
+  created_at                 DateTime                   @default(now())
+  last_updated_by            String?
+  last_updated_at            DateTime
+  is_deleted                 Boolean                    @default(false)
+  deleted_at                 DateTime?
+  deleted_by                 String?
+  email_sent                 Boolean                    @default(false)
+  email_opened               Boolean                    @default(false)
+  is_pending                 Boolean                    @default(false)
+  is_processed               Boolean                    @default(false)
+  has_organization           Boolean                    @default(false)
+  has_positions              Boolean                    @default(false)
+  retry_count                Int                        @default(0)
+  is_stuck                   Boolean                    @default(false)
+  companies                  companies?                 @relation(fields: [company_id], references: [id])
+  leads_status_single_select leads_status_single_select @relation(fields: [status], references: [value])
+}
+
+model leads_status_single_select {
+  id                 String             @id @db.Uuid
+  field_type         FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("leads_status")
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  key                String             @unique
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  leads              leads[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model licenses {
+  id                  String                @id @db.Uuid
+  name                String
+  candidate_id        String                @db.Uuid
+  created_by          String?
+  created_at          DateTime              @default(now())
+  last_updated_by     String?
+  last_updated_at     DateTime
+  deleted_at          DateTime?
+  deleted_by          String?
+  license_to_keywords license_to_keywords[]
+  candidates          candidates            @relation(fields: [candidate_id], references: [id])
+}
+
+model locations {
+  id              String       @id @db.Uuid
+  country         String
+  short_code      String
+  state           String
+  city            String
+  zip             String
+  user_id         String?
+  version         Float        @default(1.0)
+  created_by      String?
+  created_at      DateTime     @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  is_deleted      Boolean      @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  candidates      candidates[]
+
+  @@unique([id, city, state, country, zip])
+}
+
+model messages {
+  id                     String                   @id @db.Uuid
+  ms_message_id          String                   @unique
+  subject                String?
+  sender_name            String?
+  sender_email           String
+  received_date_time     DateTime?
+  sent_date_time         DateTime?
+  body                   String
+  body_preview           String?
+  recipients             Json?
+  cc_recipients          Json?
+  bcc_recipients         Json?
+  reply_to               Json?
+  has_attachments        Boolean                  @default(false)
+  summary                Json?
+  meta_data              Json
+  source_id              String                   @db.Uuid
+  isRead                 Boolean                  @default(false)
+  isStarred              Boolean                  @default(false)
+  isArchived             Boolean                  @default(false)
+  created_at             DateTime                 @default(now())
+  last_updated_at        DateTime
+  subject_embedding      Json?
+  body_embedding         Json?
+  sender_embedding       Json?
+  receiver_embedding     Json?
+  FolderMessageToMessage FolderMessageToMessage[]
+  sources                sources                  @relation(fields: [source_id], references: [id])
+
+  @@index([ms_message_id])
+  @@index([sender_email])
+  @@index([source_id])
+}
+
+model notes {
+  id              String    @id
+  table_id        String
+  field_id        String
+  note            String
+  is_private      Boolean   @default(false)
+  created_by      String
+  created_at      DateTime  @default(now())
+  last_updated_by String?
+  last_updated_at DateTime?
+  deleted_at      DateTime?
+  is_deleted      Boolean   @default(false)
+
+  @@index([table_id, field_id])
+}
+
+model oppurtunities {
+  id String @id @db.Uuid
+}
+
+model personal_information {
+  id                   String      @id @db.Uuid
+  full_name            String
+  email                String?
+  linkedin             String?
+  github               String?
+  user_id              String?
+  phone                String?
+  address_string       String?
+  country_of_residence String?
+  city_of_residence    String?
+  zip                  String?
+  state_of_residence   String?
+  age                  String?
+  is_us_citizen        Boolean?
+  created_by           String?
+  created_at           DateTime    @default(now())
+  last_updated_by      String?
+  last_updated_at      DateTime
+  is_deleted           Boolean     @default(false)
+  deleted_at           DateTime?
+  deleted_by           String?
+  candidates           candidates?
+
+  @@unique([id, full_name, email])
+  @@unique([id, full_name])
+}
+
+model pocs {
+  id           String    @id @db.Uuid
+  position_id  String    @db.Uuid
+  contact_id   String    @db.Uuid
+  contact_role String
+  created_at   DateTime  @default(now())
+  updated_at   DateTime
+  contacts     contacts  @relation(fields: [contact_id, contact_role], references: [id, job_title])
+  positions    positions @relation(fields: [position_id], references: [id])
+
+  @@unique([position_id, contact_id])
+}
+
+model policies {
+  id              String       @id @db.Uuid
+  name            String
+  description     String?
+  template_id     String
+  parent_id       String?      @db.Uuid
+  rules           Json
+  priority        Int
+  tenant_id       String?
+  status          PolicyStatus @default(ACTIVE)
+  created_at      DateTime     @default(now())
+  last_updated_at DateTime
+  policies        policies?    @relation("policiesTopolicies", fields: [parent_id], references: [id])
+  other_policies  policies[]   @relation("policiesTopolicies")
+
+  @@unique([tenant_id, name])
+  @@index([parent_id])
+  @@index([template_id])
+  @@index([tenant_id, status])
+}
+
+model positions {
+  id                    String                  @id @db.Uuid
+  title                 String
+  description           String?
+  is_active             Boolean                 @default(true)
+  company_id            String                  @db.Uuid
+  company_name          String
+  is_company_deleted    Boolean
+  company_status        String
+  location_address      String?
+  location_city         String?
+  location_state        String?
+  location_country      String?
+  location_zip          String?
+  jd_attachment_id      String?                 @db.Uuid
+  jd_filename           String?
+  jd_file_type          String?
+  jd_thumbnail          Bytes?
+  jd_classification     DocumentClassification?
+  jd_description        String
+  jd_link               String                  @db.VarChar(255)
+  job_role_id           String                  @db.Uuid
+  recruiter_bdm_id      String?
+  recruiter_assignee_id String?
+  apollo_id             String?                 @unique
+  salary_range          String?
+  airtable_metadata     Json
+  created_by            String?
+  created_at            DateTime                @default(now())
+  last_updated_by       String?
+  last_updated_at       DateTime
+  is_deleted            Boolean                 @default(false)
+  deleted_at            DateTime?
+  deleted_by            String?
+  position_to_keywords  position_to_keywords[]
+  candidate_submissions candidate_submissions[]
+  pocs                  pocs[]
+  companies             companies               @relation(fields: [company_id, is_company_deleted, company_name, company_status], references: [id, is_deleted, name, status])
+  documents             documents?              @relation(fields: [jd_attachment_id, jd_filename, jd_file_type, jd_link, jd_thumbnail, jd_classification], references: [id, filename, mime_type, url, thumbnail, classification])
+  job_roles             job_roles               @relation(fields: [job_role_id], references: [id])
+
+  @@unique([id, company_id, is_deleted, is_company_deleted, company_name])
+  @@unique([id, title])
+  @@index([is_deleted(sort: Desc), is_company_deleted(sort: Desc), created_at], map: "positions_deleted_company_deleted_created_at")
+  @@index([is_deleted, deleted_at(sort: Desc)])
+  @@index([is_deleted, is_company_deleted(sort: Desc), created_at])
+}
+
+model possible_job_roles {
+  id              String     @id @db.Uuid
+  job_role        String
+  user_id         String?
+  candidate_id    String     @db.Uuid
+  created_by      String?
+  created_at      DateTime   @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  deleted_at      DateTime?
+  deleted_by      String?
+  candidates      candidates @relation(fields: [candidate_id], references: [id])
+}
+
+model reminders {
+  id         String    @id @db.Uuid
+  task_id    String    @db.Uuid
+  remind_at  DateTime
+  message    String?
+  is_sent    Boolean   @default(false)
+  sent_at    DateTime?
+  created_at DateTime  @default(now())
+  updated_at DateTime
+  tasks      tasks     @relation(fields: [task_id], references: [id])
+
+  @@index([remind_at, is_sent])
+  @@index([task_id])
+}
+
+model sheet_configs {
+  id              String        @id @db.Uuid
+  layout_type     String
+  sheet_config_id String        @unique
+  display_name    String
+  description     String?
+  relation        String?
+  action          String?
+  api_endpoint    String?
+  hidden_fields   String[]
+  table_schema_id String        @db.Uuid
+  db_table_name   String
+  created_by      String?
+  created_at      DateTime      @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  is_deleted      Boolean       @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  table_schemas   table_schemas @relation(fields: [table_schema_id, db_table_name], references: [id, db_table_name])
+
+  @@index([table_schema_id])
+}
+
+model sources {
+  id          String      @id @db.Uuid
+  type_id     String      @db.Uuid
+  messages    messages[]
+  MessageType MessageType @relation(fields: [type_id], references: [id])
+}
+
+model spf_records {
+  id              String          @id @db.Uuid
+  domain_id       String          @unique @db.Uuid
+  dns_record_id   String          @unique @db.Uuid
+  mechanisms      String[]
+  all             SPFAllDirective
+  created_at      DateTime        @default(now())
+  last_updated_at DateTime
+  deleted_at      DateTime?
+  dns_records     dns_records     @relation(fields: [dns_record_id, domain_id], references: [id, domain_id])
+
+  @@unique([dns_record_id, domain_id])
+  @@index([dns_record_id])
+}
+
+model table_fields {
+  id                 String        @id @db.Uuid
+  table_schema_id    String        @db.Uuid
+  field_id           String        @unique
+  field_order        Int
+  display_name       String
+  db_field_name      String
+  type               FieldType
+  db_field_type      DBFieldType
+  is_relational      Boolean       @default(false)
+  relation           Json?
+  formatting         Json?
+  validation         Json?
+  display            Json?
+  field_edit_options Json?
+  icon               String?
+  created_by         String?
+  created_at         DateTime      @default(now())
+  last_updated_by    String?
+  last_updated_at    DateTime
+  is_deleted         Boolean       @default(false)
+  deleted_at         DateTime?
+  deleted_by         String?
+  table_schemas      table_schemas @relation(fields: [table_schema_id], references: [id], onDelete: Cascade)
+
+  @@index([field_id])
+  @@index([table_schema_id])
+}
+
+model table_schemas {
+  id                 String             @id @db.Uuid
+  frontend_config_id String             @db.Uuid
+  table_id           String             @unique
+  table_name         String
+  db_table_name      String
+  endpoint_url       String?
+  table_description  String?
+  icon               String?
+  version            String?
+  hidden_fields      String[]
+  default_views      String[]
+  user_specific      String[]
+  history            String[]
+  context_options    Json?
+  created_by         String?
+  created_at         DateTime           @default(now())
+  last_updated_by    String?
+  last_updated_at    DateTime
+  is_deleted         Boolean            @default(false)
+  deleted_at         DateTime?
+  deleted_by         String?
+  field_references   field_references[]
+  sheet_configs      sheet_configs[]
+  table_fields       table_fields[]
+  frontend_configs   frontend_configs   @relation(fields: [frontend_config_id], references: [id], onDelete: Cascade)
+
+  @@unique([id, db_table_name])
+  @@index([frontend_config_id])
+}
+
+model table_views {
+  id                 String @id @db.Uuid
+  table_id           String @db.Uuid
+  table_display_name String @unique
+  view_config        Json
+}
+
+model tasks {
+  id              String      @id @db.Uuid
+  title           String
+  details         String?
+  status          TaskStatus  @default(PENDING)
+  priority        Priority    @default(MEDIUM)
+  due_date        DateTime?
+  completed_at    DateTime?
+  parent_id       String?     @db.Uuid
+  assignee        String      @db.Uuid
+  created_by      String
+  created_at      DateTime    @default(now())
+  last_updated_at DateTime
+  last_updated_by String
+  is_deleted      Boolean?    @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  reminders       reminders[]
+  tasks           tasks?      @relation("tasksTotasks", fields: [parent_id], references: [id])
+  other_tasks     tasks[]     @relation("tasksTotasks")
+
+  @@index([parent_id])
+  @@index([status, due_date])
+}
+
+model tenant_configurations {
+  id                    String                  @id @db.Uuid
+  tenant_id             String                  @unique @db.Uuid
+  policy_id             String?                 @db.Uuid
+  config                Json
+  status                ConfigStatus            @default(ACTIVE)
+  last_updated_at       DateTime
+  created_at            DateTime                @default(now())
+  api_keys              api_keys[]
+  domains               domains[]
+  email_preference      email_preference?
+  email_servers         email_servers[]
+  external_integrations external_integrations[]
+
+  @@unique([id, tenant_id])
+  @@index([tenant_id])
+  @@index([tenant_id, status])
+}
+
+model tenant_usage_metrics {
+  id            String   @id @db.Uuid
+  user_id       String   @db.Uuid
+  resource_code String
+  module_code   String?
+  feature_code  String?
+  value         Float
+  context       Json?
+  timestamp     DateTime @default(now())
+
+  @@index([resource_code])
+  @@index([timestamp])
+  @@index([user_id])
+}
+
+model thread_context {
+  id                     String                   @id @db.Uuid
+  context_hash           String                   @unique @db.Char(64)
+  context                String
+  created_at             DateTime                 @default(now())
+  last_updated_at        DateTime
+  Thread                 Thread?
+  thread_context_history thread_context_history[]
+
+  @@unique([id, context_hash])
+}
+
+model thread_context_history {
+  id                   String                 @id @db.Uuid
+  context              String
+  created_at           DateTime               @default(now())
+  last_updated_at      DateTime
+  thread_context_id    String                 @db.Uuid
+  thread_context       thread_context         @relation(fields: [thread_context_id], references: [id])
+  thread_context_items thread_context_items[]
+
+  @@index([thread_context_id])
+}
+
+model thread_context_items {
+  id                        String                  @id @db.Uuid
+  context                   String
+  organization              String
+  contact                   String
+  position                  String
+  submission                String
+  thread_context_history_id String?                 @db.Uuid
+  thread_context_history    thread_context_history? @relation(fields: [thread_context_history_id], references: [id])
+}
+
+model thread_messages {
+  id                 String   @id @db.Uuid
+  conversation_id    String?  @db.Uuid
+  ms_conversation_id String
+  domain             String
+  message_db_id      String   @db.Uuid
+  ms_message_id      String   @unique
+  parent_db_id       String?  @db.Uuid
+  parent_id          String?
+  child_db_id        String?  @db.Uuid
+  child_id           String?
+  is_root            Boolean  @default(false)
+  created_at         DateTime @default(now())
+  last_updated_at    DateTime
+  thread_id          String   @db.Uuid
+  Thread             Thread   @relation(fields: [thread_id], references: [id])
+
+  @@index([conversation_id])
+  @@index([is_root])
+  @@index([thread_id])
+  @@index([thread_id, is_root])
+}
+
+model thread_participants {
+  id                         String                       @id @db.Uuid
+  name                       String
+  domain                     String
+  email                      String                       @unique
+  is_internal_user           Boolean?                     @default(false)
+  ThreadToThreadParticipants ThreadToThreadParticipants[]
+
+  @@index([domain])
+  @@index([email])
+}
+
+model thread_summary {
+  id              String   @id @db.Uuid
+  conversation_id String
+  domain          String
+  message_db_ids  String[]
+  ms_message_id   String[]
+  summary         Json?
+  created_at      DateTime @default(now())
+  last_updated_at DateTime
+  Thread          Thread[]
+
+  @@index([conversation_id])
+  @@index([domain, conversation_id])
+  @@index([domain])
+  @@index([message_db_ids], type: Gin)
+  @@index([ms_message_id], type: Gin)
+}
+
+model timezones {
+  id                 String             @id @db.Uuid
+  field_type         FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("timezone")
+  icon               String?
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  key                String             @unique
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  interviews         interviews[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([field_type])
+  @@index([key])
+  @@index([value])
+}
+
+model user_addresses {
+  id              String    @id @db.Uuid
+  country         String
+  short_code      String
+  state           String
+  city            String
+  zip             String
+  address         String?
+  created_by      String    @default("system")
+  last_updated_by String    @default("system")
+  deleted_by      String?
+  created_at      DateTime  @default(now())
+  last_updated_at DateTime
+  deleted_at      DateTime?
+  user_id         String    @unique @db.Uuid
+  users           users     @relation(fields: [user_id], references: [id])
+
+  @@unique([country, short_code, state, city, zip, user_id])
+  @@index([country])
+  @@index([deleted_at])
+  @@index([last_updated_at])
+  @@index([zip])
+  @@index([zip, user_id])
+}
+
+model user_attributes {
+  id              String     @id @db.Uuid
+  tenant_id       String
+  user_id         String
+  attribute_id    String     @db.Uuid
+  version         Float      @default(1.0)
+  value           String?
+  created_by      String?
+  created_at      DateTime   @default(now())
+  last_updated_by String?
+  last_updated_at DateTime
+  is_deleted      Boolean    @default(false)
+  deleted_at      DateTime?
+  deleted_by      String?
+  attributes      attributes @relation(fields: [attribute_id], references: [id])
+
+  @@unique([user_id, attribute_id])
+  @@index([attribute_id])
+  @@index([created_at])
+  @@index([is_deleted, deleted_at])
+  @@index([last_updated_at])
+  @@index([user_id])
+}
+
+model user_device_locations {
+  id                                                                              String        @id @db.Uuid
+  lat                                                                             Float
+  long                                                                            Float
+  user_id                                                                         String        @unique @db.Uuid
+  device_id                                                                       String        @unique @db.Uuid
+  user_devices_user_device_locations_device_id_user_idTouser_devices              user_devices  @relation("user_device_locations_device_id_user_idTouser_devices", fields: [device_id, user_id], references: [id, user_id])
+  user_devices_user_devices_last_accessed_from_location_idTouser_device_locations user_devices? @relation("user_devices_last_accessed_from_location_idTouser_device_locations")
+
+  @@index([id, device_id])
+  @@unique([device_id, user_id])
+}
+
+model user_devices {
+  id                                                                                       String                 @id @db.Uuid
+  unique_device_signature                                                                  String                 @unique
+  user_id                                                                                  String                 @unique @db.Uuid
+  last_accessed_at                                                                         DateTime
+  last_accessed_from_location_id                                                           String                 @unique @db.Uuid
+  device_metadata                                                                          Json[]
+  user_device_locations_user_device_locations_device_id_user_idTouser_devices              user_device_locations? @relation("user_device_locations_device_id_user_idTouser_devices")
+  user_device_locations_user_devices_last_accessed_from_location_idTouser_device_locations user_device_locations  @relation("user_devices_last_accessed_from_location_idTouser_device_locations", fields: [last_accessed_from_location_id], references: [id])
+  users                                                                                    users                  @relation(fields: [user_id], references: [id])
+
+  @@unique([id, unique_device_signature, user_id])
+  @@unique([id, user_id])
+  @@index([unique_device_signature])
+  @@index([user_id])
+}
+
+model user_group_members {
+  id            String      @id @db.Uuid
+  user_group_id String      @db.Uuid
+  user_id       String      @unique @db.Uuid
+  created_at    DateTime    @default(now())
+  user_groups   user_groups @relation(fields: [user_group_id], references: [id])
+  users         users       @relation(fields: [user_id], references: [id])
+
+  @@unique([user_group_id, user_id])
+  @@index([user_id])
+}
+
+model user_groups {
+  id                 String               @id @db.Uuid
+  name               String
+  description        String?
+  group_id           String               @db.Uuid
+  created_at         DateTime             @default(now())
+  last_updated_at    DateTime
+  group_policies     group_policies[]
+  user_group_members user_group_members[]
+  groups             groups               @relation(fields: [group_id], references: [id])
+
+  @@index([group_id])
+}
+
+model user_job_title_single_select {
+  id                 String             @id @db.Uuid
+  field_type         FrontendFieldTypes @default(SINGLE_SELECT)
+  field_display_name String             @default("leads_status")
+  color              String?            @db.VarChar(32)
+  color_hex          String?            @db.Char(6)
+  key                String             @unique
+  value              String             @unique
+  created_by         String             @default("system")
+  created_at         DateTime           @default(now())
+  users              users[]
+
+  @@index([color])
+  @@index([field_display_name])
+  @@index([value])
+}
+
+model users {
+  id                           String                        @id @db.Uuid
+  first_name                   String
+  last_name                    String
+  username                     String                        @unique
+  email                        String                        @unique
+  password                     String
+  psuedo_first_name            String?
+  psuedo_last_name             String?
+  bio                          String?
+  phone                        String?
+  job_title                    String?
+  status                       String?
+  gender                       Gender?
+  personal_phone               String?
+  personal_email               String?
+  date_of_joining              DateTime?
+  email_verified               Boolean?                      @default(true)
+  last_login                   DateTime?
+  created_by                   String?
+  created_at                   DateTime                      @default(now())
+  last_updated_by              String?
+  last_updated_at              DateTime?
+  deleted_at                   DateTime?
+  deleted_by                   String?
+  tenant_id                    String                        @db.Uuid
+  airtable_metadata            Json?
+  interview_attendies_id       String?                       @db.Uuid
+  DocumentSharedWithUsers      DocumentSharedWithUsers[]
+  comment_mentions             comment_mentions[]
+  documents                    documents[]
+  folders                      folders[]
+  user_addresses               user_addresses?
+  user_devices                 user_devices?
+  user_group_members           user_group_members?
+  interview_attendees          interview_attendees?          @relation(fields: [interview_attendies_id], references: [id])
+  user_job_title_single_select user_job_title_single_select? @relation(fields: [job_title], references: [value])
+
+  @@unique([id, email, first_name, last_name])
+  @@unique([id, first_name, last_name])
+  @@unique([id, first_name, last_name, username, email])
+  @@index([created_at])
+  @@index([deleted_at])
+  @@index([email])
+  @@index([last_updated_at])
+  @@index([username])
+}
+
+model work_experiences {
+  id                String     @id @db.Uuid
+  title             String     @db.VarChar(120)
+  organization_name String
+  is_present        Boolean
+  description       String
+  start_month_year  String
+  end_month_year    String?
+  candidate_id      String     @db.Uuid
+  created_by        String?
+  created_at        DateTime   @default(now())
+  last_updated_by   String?
+  last_updated_at   DateTime
+  deleted_at        DateTime?
+  deleted_by        String?
+  job_role_id       String?    @db.Uuid
+  candidates        candidates @relation(fields: [candidate_id], references: [id])
+  job_roles         job_roles? @relation(fields: [job_role_id], references: [id])
+
+  @@index([description])
+  @@index([is_present])
+  @@index([organization_name])
+  @@index([title])
+}
+
+enum AuthStrategy {
+  API_KEY
+  OAUTH2
+  EMAIL_PASSWORD
+  CERTIFICATE
+  CUSTOM_TOKEN
+  JWT
+  BASIC_AUTH
+}
+
+enum BooleanStringEntityType {
+  JobRole
+  Position
+}
+
+enum ConfigStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+enum ConversationTopic {
+  INITIAL_CONTACT
+  POSITION_DESCRIPTION
+  JOB_DESCRIPTION
+  CANDIDATE_SUBMISSION
+  CANDIDATE_REVIEW
+  INTERVIEW
+  CONTRACT
+  EMPLOYMENT
+}
+
+enum CreditTypeEnum {
+  API
+  EMAIL
+}
+
+enum DBFieldType {
+  VARCHAR
+  TEXT
+  TIMESTAMP
+  BOOLEAN
+  INTEGER
+  DECIMAL
+  POINT
+  RELATION
+}
+
+enum DMARCPolicy {
+  NONE
+  QUARANTINE
+  REJECT
+}
+
+enum DNSRecordType {
+  A
+  AAAA
+  CNAME
+  MX
+  TXT
+  SPF
+  DKIM
+  DMARC
+}
+
+enum DeliveryChannel {
+  EMAIL
+  WEBHOOK
+  SYSTEM
+  CUSTOM
+}
+
+enum DisplayType {
+  text
+  badge
+  avatar
+  link
+  tag
+  status
+  attachment
+}
+
+enum DocumentClassification {
+  SERVICE_AGREEMENT
+  JOB_DESCRIPTION
+  RESUME
+  CONTRACT
+  QUOTATION
+  INVOICE
+  RECEIPT
+  TAX_FORMS
+  IDENTITY_DOCUMENTS
+  WORK_PERMIT
+  VISA_DOCUMENTS
+  OFFER_LETTER
+  EMPLOYMENT_CONTRACT
+  MARKETING
+  IT
+  OTHER
+}
+
+enum DomainStatus {
+  PENDING
+  ACTIVE
+  VERIFIED
+  SUSPENDED
+}
+
+enum EmailActionType {
+  REPLY
+  REQUEST_JD
+  REQUEST_RESUME
+  REQUEST_REVIEW
+  REQUEST_RESUME_REVIEW
+  REQUEST_DETAILS
+  REQUEST_FOLLOWUP
+  REQUEST_BENEFITS_DETAILS
+  REQUEST_EXPERIENCE_CERTIFICATE
+  REREQUEST_NEW_POSITION
+  FOLLOWUP
+  FORWARD
+  CHANGE_POC
+  SEND_CONTRACT
+  SCHEDULE_INTERVIEW
+  SEND_RESUME
+  SEND_OFFER_LETTER
+  SEND_JD
+  SALARY_NEGOTIATIONS
+  CONTRACT_NEGOTIATIONS
+  SUBMIT_CONTRACT_REVIEW
+  SUBMIT_RESUME_REVIEW
+}
+
+enum EmailServerType {
+  SMTP
+  IMAP
+}
+
+enum EmailStatus {
+  DRAFT
+  QUEUED
+  SENT
+  FAILED
+  READ
+  UNREAD
+}
+
+enum EmailTypes {
+  MARKETING
+  TRANSACTIONAL
+  PROMOTIONAL
+  COLD_EMAIL_CAMPAIGN
+  FOLLOW_UP
+  AUTOMATED
+  NOTIFICATION
+}
+
+enum ExtUsageTrackingInterval {
+  MINUTE
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  QUARTER
+  YEAR
+}
+
+enum FieldType {
+  SHORT_TEXT
+  LONG_TEXT
+  DATE
+  DATETIME
+  URL
+  EMAIL
+  PHONE
+  CHECKBOX
+  NUMBER
+  PERCENT
+  CURRENCY
+  GEOLOCATION
+  USER
+  ATTACHMENT
+  FORMULA
+  MULTI_SELECT
+  SINGLE_SELECT
+  LINK_TO_ANOTHER_RECORD
+}
+
+enum FolderType {
+  INCOMING_FOLDER
+  OUTGOING_FOLDER
+}
+
+enum FrontendFieldTypes {
+  DATE
+  DATE_TIME
+  SHORT_TEXT
+  LONG_TEXT
+  URL
+  EMAIL
+  PHONE
+  USER
+  ATTACHMENT
+  CHECKBOX
+  MUTLI_SELECT
+  SINGLE_SELECT
+  NUMBER
+  PERCENT
+  CURRENCY
+  ONE_TO_MANY
+  ONE_TO_ONE
+  GEOLOCATION
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum IntegrationCategory {
+  ANALYTICS
+  BILLING
+  COMMUNICATION
+  DATA_ENRICHMENT
+  AI_SERVICES
+  CUSTOM
+}
+
+enum IntegrationName {
+  LAGO
+  OPENMETER
+  FLUENTD
+  LOKI
+  STRIPE
+  APOLLO
+  OPENAI
+  ZOOMINFO
+  MAILCOW
+  MSGRAPH
+  SENDGRID
+  AIRTABLE
+  CUSTOM
+}
+
+enum MailType {
+  MAILCOW
+  SENDGRID
+  MICROSOFT_GRAPH_API
+}
+
+enum MessageSource {
+  MS_GRAPH
+  MAILCOW
+  SG
+}
+
+enum MetricType {
+  API_CALLS
+  DATA_TRANSFER
+  STORAGE
+  PROCESSING_TIME
+  CUSTOM
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  USAGE_THRESHOLD
+  RATE_LIMIT
+  ERROR
+  STATUS_CHANGE
+  CUSTOM
+}
+
+enum PolicyStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum RecipientType {
+  CANDIDATE
+  INTERNAL_USER
+  CLIENT_CONTACT
+  EXTERNAL_USER
+}
+
+enum RelationType {
+  ONE
+  MANY
+}
+
+enum SMTPStatus {
+  ACTIVE
+  INACTIVE
+  PENDING_VERIFICATION
+}
+
+enum SPFAllDirective {
+  PASS
+  NEUTRAL
+  SOFTFAIL
+  FAIL
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TermCategory {
+  INDUSTRY
+  TECHNICAL_SKILL
+  SOFT_SKILL
+  ROLE_TITLE
+  RESPONSIBILITY
+  TOOL
+  CERTIFICATION
+  DOMAIN
+}
+
+enum TermType {
+  NOUN
+  VERB
+  ADJECTIVE
+  COMPOUND
+}
