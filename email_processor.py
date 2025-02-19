@@ -11,6 +11,60 @@ from typing import List
 import numpy as np
 import os
 # First, let's keep our BGE embeddings class since it's essential for the vector store
+
+business_context=''' ProficientNow Sales Pipeline Stages
+1. Prospect Stage
+Description:
+Research team finds possible client companies
+Basic information gathering about the company
+Visibility:
+Fully Visible (through internal research documents and emails)
+2. Lead Generation Stage
+Description:
+Send first emails to companies
+Follow up if they don't reply
+If company replies, talk about services
+Basic information exchange
+Visibility:
+Fully Visible (through email chains and internal updates)
+3. Opportunity Stage
+Description:
+Transfer from Research team to Business Development Manager (BDM)
+Detailed client requirement gathering by the BDM
+Visibility:
+Fully Visible (emails visible)
+4. Fulfillment Stage
+Description:
+Assignment of recruiters
+Active candidate sourcing
+Candidate screening and shortlisting
+Profile sharing with the client
+Interview coordination
+Candidate preparation
+Interview feedback collection
+Visibility:
+Mix of Fully Visible (emails) and Not Visible (candidate calls and text messages)
+5. Deal Stage
+Description:
+Contract negotiation
+Terms and conditions discussion
+Payment terms finalization
+Service level agreements
+Legal documentation
+Contract signing
+Visibility:
+Fully Visible (through contract emails and documentation)
+6. Sale Stage
+Description:
+Successful candidate placement
+Offer letter issuance
+Candidate joining confirmation
+Invoice generation
+Payment collection
+Receipt acknowledgment
+Post-placement follow-up
+Visibility:
+Fully Visible (through emails and system documentation) ''' 
 class BGEEmbeddings(Embeddings):
     def __init__(self, model_name: str = 'BAAI/bge-large-en-v1.5'):
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -70,7 +124,7 @@ class EmailProcessor:
         ])
         
         response_prompt = ChatPromptTemplate.from_messages([
-            ("system", f"Classify emails using categories: RECRUITMENT/INTERVIEW/ONBOARDING/GENERAL. "),
+            ("system", f"Classify the emails under the following sales stages: {business_context}"),
             ("human", "Email content:\n{input}")
         ])
         
@@ -138,11 +192,9 @@ class EmailProcessor:
             # Call the FLARE chain and capture the result
             print("\nCalling FLARE chain...")
             result = self.flare_chain.run({
-            "user_input": f"""You must classify each email into exactly one of these categories:
-            - RECRUITMENT: Emails about finding and attracting candidates
-            - INTERVIEW: Emails about scheduling or conducting interviews
-            - ONBOARDING: Emails about new hire paperwork and orientation
-            - GENERAL: Any other business communication. Analyse similar emails to this and take a decision, email: {email_content}"""
+            "user_input": f"""
+            Classify the emails under the following sales stages: {business_context} 
+            Analyse similar emails to this and take a decision, email: {email_content}"""
             })
 
             
