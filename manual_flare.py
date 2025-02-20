@@ -193,6 +193,10 @@ class ManualEmailClassifier:
         """Main classification workflow"""
         try:
             emails = await self._get_unprocessed_emails(batch_size)
+            if not emails:
+                return {"status": "no_emails", "message": "No unprocessed emails found"}
+            
+            classification_results = []
             
             for email in emails:
                 # Step 1: Initial classification
@@ -225,13 +229,56 @@ class ManualEmailClassifier:
                     domain_analysis
                 )
                 logger.info(f"Final classification result: {final_result}")
+
+                similar_emails = []
+                for line in retrieved_context.split('\n'):
+                    if line.startswith('Similar email'):
+                        parts = line.split(' | ')
+                        email_data = {}
+                        for part in parts:
+                            if ': ' in part:
+                                key, value = part.split(': ', 1)
+                                email_data[key.strip()] = value.strip()
+                        if email_data:
+                            similar_emails.append(email_data)
+
+                email_result = {
+                    "email_details": {
+                        "id": email.id,
+                        "subject": email.subject,
+                        "sender": email.sender_email,
+                        "recipients": email.recipients,
+                        "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                        "body": text_body
+                    },
+                    "domain_analysis": domain_analysis,
+                    "initial_classification": initial_result,
+                    "similar_emails": similar_emails,
+                    "classification_process": {
+                        "iterations": final_result["iterations"],
+                        "total_iterations": final_result["total_iterations"],
+                        "final_result": final_result["final_result"]
+                    },
+                    "status": "success"
+                }
+            
+                classification_results.append(email_result)
                 
                 # Step 4: Update with final category
-                await self._update_email_category(email.id, final_result['category'])
+                await self._update_email_category(email.id, final_result["final_result"]["category"])
+            return {
+                "status": "success",
+                "results": classification_results,
+                "total_processed": len(classification_results)
+            }
                     
         except Exception as e:
             logger.error(f"Error during email classification: {str(e)}")
-            raise
+            return {
+                "status": "error",
+                "message": str(e),
+                "results": []
+            }
 
     async def _initial_classification(self, email,domain_analysis) -> dict:
         """Get initial classification with uncertainty detection"""
@@ -494,7 +541,12 @@ class ManualEmailClassifier:
         current_result = json.loads(response.choices[0].message.content)
         logger.info(f"Initial final classification result: {current_result}")
 
-        
+        iteration_results = [{
+            "iteration": 0,
+            "classification": current_result,
+            "questions": None,
+            "additional_context": None
+        }]
         max_iterations = 3
         current_iteration = 0
         # current_result = initial_result
@@ -611,6 +663,13 @@ class ManualEmailClassifier:
             
             current_result = json.loads(response.choices[0].message.content)
             logger.info(f"Iteration {current_iteration + 1} result: {current_result}")
+
+            iteration_results.append({
+            "iteration": current_iteration + 1,
+            "classification": current_result,
+            "questions": questions,
+            "additional_context": additional_context
+            })
             
             current_iteration += 1
             
@@ -618,7 +677,11 @@ class ManualEmailClassifier:
             if current_result['confidence'] >= 0.9:
                 break
         
-        return current_result
+        return {
+        "final_result": current_result,
+        "iterations": iteration_results,
+        "total_iterations": current_iteration + 1
+        }
 
     def _get_pipeline_descriptions(self) -> str:
         """Return formatted pipeline stages"""
@@ -656,7 +719,7 @@ class ManualEmailClassifier:
     async def _get_unprocessed_emails(self, batch_size: int):
         """Retrieve unprocessed emails from database"""
         return await self.prisma.messages.find_many(
-            skip=888,
+            skip=1,
             take=batch_size,
             order={'sent_date_time': 'desc'}
         )
