@@ -7,7 +7,7 @@ class EntityEnricher:
     def __init__(self,prisma_client,lighweigth_llm):
         self.prisma=prisma_client
         self.llm=lighweigth_llm
-                self.extraction_prompt = ChatPromptTemplate.from_messages([
+        self.extraction_prompt = ChatPromptTemplate.from_messages([
             ("system", """You are an expert at identifying business entities in emails.
             Focus only on identifying companies, candidates, positions, and contacts.
             Only return high-confidence matches (>0.8).

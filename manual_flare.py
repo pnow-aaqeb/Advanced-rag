@@ -189,10 +189,10 @@ class ManualEmailClassifier:
         # Example confidence threshold
         self.confidence_threshold = 0.7
 
-    async def classify_emails(self, batch_size=1):
+    async def classify_emails(self, batch_size=10,skip=100):
         """Main classification workflow"""
         try:
-            emails = await self._get_unprocessed_emails(batch_size)
+            emails = await self._get_unprocessed_emails(batch_size,skip)
             if not emails:
                 return {"status": "no_emails", "message": "No unprocessed emails found"}
             
@@ -716,10 +716,10 @@ class ManualEmailClassifier:
         
         return text.strip()
 
-    async def _get_unprocessed_emails(self, batch_size: int):
+    async def _get_unprocessed_emails(self, batch_size: int,skip:int):
         """Retrieve unprocessed emails from database"""
         return await self.prisma.messages.find_many(
-            skip=1,
+            skip=skip,
             take=batch_size,
             order={'sent_date_time': 'desc'}
         )

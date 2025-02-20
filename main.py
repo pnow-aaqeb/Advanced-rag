@@ -8,6 +8,9 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import os
 from fastapi.middleware.cors import CORSMiddleware
+import json
+from datetime import datetime
+from pathlib import Path
 
 # Load environment variables and configure logging
 load_dotenv()
@@ -18,6 +21,53 @@ logger = logging.getLogger(__name__)
 prisma = Prisma()
 pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
 openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+# Define the results file path
+RESULTS_FILE = "email_classification_results.json"
+
+async def load_existing_results():
+    """
+    Load existing results from the JSON file.
+    If the file doesn't exist or is empty, return an empty list.
+    """
+    try:
+        if Path(RESULTS_FILE).exists():
+            with open(RESULTS_FILE, 'r') as f:
+                return json.load(f)
+        return []
+    except json.JSONDecodeError:
+        logger.warning(f"Could not decode {RESULTS_FILE}. Starting with empty results.")
+        return []
+    except Exception as e:
+        logger.error(f"Error loading results file: {str(e)}")
+        return []
+
+async def save_results(new_results):
+    """
+    Save new results to the JSON file by appending them to existing results.
+    
+    Args:
+        new_results (dict): The new classification results to save
+    """
+    try:
+        # Load existing results
+        existing_results = await load_existing_results()
+        
+        # Add timestamp to new results
+        new_results['timestamp'] = datetime.now().isoformat()
+        
+        # Append new results
+        existing_results.append(new_results)
+        
+        # Write back to file with proper formatting
+        with open(RESULTS_FILE, 'w') as f:
+            json.dump(existing_results, f, indent=2, ensure_ascii=False)
+            
+        logger.info(f"Successfully saved results to {RESULTS_FILE}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save results: {str(e)}")
+        raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,10 +95,12 @@ app = FastAPI(lifespan=lifespan)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Update with your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600
 )
 
 # Initialize email classifier
@@ -61,11 +113,12 @@ classifier = ManualEmailClassifier(
 @app.post("/process-emails")
 async def process_emails():
     """
-    Endpoint to process emails and return classification results immediately
+    Endpoint to process emails and return classification results immediately.
+    Results are both returned to the client and saved to a JSON file.
     """
     try:
         # Process next batch of emails and get results
-        results = await classifier.classify_emails(batch_size=1)
+        results = await classifier.classify_emails(batch_size=10, skip=110)
         
         if not results or results.get("status") == "no_emails":
             raise HTTPException(
@@ -78,6 +131,9 @@ async def process_emails():
                 status_code=500,
                 detail=results.get("message", "Classification failed")
             )
+        
+        # Save results to JSON file
+        await save_results(results)
             
         return results
         
