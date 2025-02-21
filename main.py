@@ -111,26 +111,43 @@ classifier = ManualEmailClassifier(
 )
 
 @app.post("/process-emails")
-async def process_emails():
+async def process_emails(skip: int = 0, batch_size: int = 10):
     """
     Endpoint to process emails and return classification results immediately.
     Results are both returned to the client and saved to a JSON file.
+    
+    Args:
+        skip (int): Number of emails to skip (for pagination)
+        batch_size (int): Number of emails to process in this batch
     """
     try:
-        # Process next batch of emails and get results
-        results = await classifier.classify_emails(batch_size=10, skip=110)
+        # Log the incoming parameters
+        logger.info(f"Processing emails with skip={skip}, batch_size={batch_size}")
+        
+        # Process emails with the provided skip value
+        results = await classifier.classify_emails(batch_size=batch_size, skip=skip)
         
         if not results or results.get("status") == "no_emails":
+            logger.info("No unprocessed emails found")
             raise HTTPException(
                 status_code=404,
                 detail="No unprocessed emails found"
             )
             
         if results.get("status") == "error":
+            logger.error(f"Classification failed: {results.get('message', 'Unknown error')}")
             raise HTTPException(
                 status_code=500,
                 detail=results.get("message", "Classification failed")
             )
+        
+        # Calculate the next skip value based on current skip + number of processed emails
+        processed_count = len(results.get("results", []))
+        next_skip = skip + processed_count
+        
+        # Add the next skip value to the response
+        results["next_skip"] = next_skip
+        logger.info(f"Processed {processed_count} emails. Next skip value: {next_skip}")
         
         # Save results to JSON file
         await save_results(results)
@@ -143,7 +160,6 @@ async def process_emails():
             status_code=500,
             detail=str(e)
         )
-
 @app.get("/health")
 async def health_check():
     """

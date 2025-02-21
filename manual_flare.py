@@ -82,6 +82,39 @@ class EmailDomainAnalyzer:
             'inbox.com', 'live.com', 'msn.com', 'ymail.com'
         }
 
+        self.vendor_domains = {
+            'zohocorp.com',
+            'microsoft.com',
+            'adobe.com',
+            'aws.amazon.com',
+            'google.com',
+            'salesforce.com',
+            'slack.com',
+            'dropbox.com',
+            'atlassian.com',
+            'github.com',
+            'zendesk.com',
+            'hubspot.com',
+            'asana.com',
+            'stripe.com',
+            'docusign.com',
+            'quickbooks.intuit.com'
+            # Add more vendor domains as identified
+        }
+        
+    def is_self_addressed_email(self, sender_email: str, recipients: List[Dict]) -> bool:
+        """
+        Checks if an email is sent from a person to themselves.
+        This is likely a draft, template, or test email, not a real communication.
+        """
+        if not sender_email or not recipients:
+            return False
+            
+        recipient_emails = [r['emailAddress']['address'].lower() 
+                        for r in recipients if 'emailAddress' in r]
+                        
+        return sender_email.lower() in recipient_emails and len(recipient_emails) == 1
+
     def analyze_email_addresses(self, sender_email: str, recipients: List[Dict]) -> Dict:
         """
         Analyzes email domains to help determine if this is likely a candidate communication.
@@ -98,24 +131,40 @@ class EmailDomainAnalyzer:
         recipient_domains = [self._extract_domain(r['emailAddress']['address']) 
                            for r in recipients if 'emailAddress' in r]
         
-        # Analyze domain patterns
+        # Initialize analysis dict FIRST before referencing it
         analysis = {
             'sender_is_company': sender_domain in self.company_domains,
             'sender_is_generic': sender_domain in self.generic_domains,
+            'sender_is_vendor': sender_domain in self.vendor_domains,
             'sender_domain': sender_domain,
             'recipient_domains': list(set(recipient_domains)),
             'recipient_analysis': {
                 'company_domains': len([d for d in recipient_domains if d in self.company_domains]),
                 'generic_domains': len([d for d in recipient_domains if d in self.generic_domains]),
+                'vendor_domains': len([d for d in recipient_domains if d in self.vendor_domains]),
                 'other_domains': len([d for d in recipient_domains 
-                                    if d not in self.company_domains and d not in self.generic_domains])
+                                    if d not in self.company_domains 
+                                    and d not in self.generic_domains
+                                    and d not in self.vendor_domains])
             },
+            'email_direction': self._determine_email_direction(sender_domain, recipient_domains),
             'is_likely_candidate_email': False,
+            'is_likely_vendor_email': False,
+            'is_self_addressed': self.is_self_addressed_email(sender_email, recipients),
             'confidence': 0.0,
             'reasoning': []
         }
         
-        # Add reasoning based on patterns
+        # Now add reasoning based on patterns
+        if analysis['sender_is_vendor']:
+            analysis['reasoning'].append("Email from a known vendor domain")
+            analysis['is_likely_vendor_email'] = True
+            analysis['confidence'] += 0.5
+        
+        if not analysis['sender_is_vendor'] and analysis['recipient_analysis']['vendor_domains'] > 0:
+            analysis['reasoning'].append("Email to a known vendor domain")
+            analysis['confidence'] += 0.3
+            
         if analysis['sender_is_company'] and analysis['recipient_analysis']['generic_domains'] > 0:
             analysis['reasoning'].append("Company sending to generic email addresses (typical for candidate communication)")
             analysis['is_likely_candidate_email'] = True
@@ -130,10 +179,33 @@ class EmailDomainAnalyzer:
             analysis['reasoning'].append("Company domains in recipients (internal communication)")
             analysis['confidence'] += 0.2
             
+        if analysis['is_self_addressed']:
+            analysis['reasoning'].append("Email sent from a person to themselves (likely a template or test)")
+            analysis['confidence'] += 0.8
+            
         # Analyze job-related content indicators
         analysis['job_related_indicators'] = self._analyze_job_indicators(analysis)
         
         return analysis
+    
+    def _determine_email_direction(self, sender_domain: str, recipient_domains: List[str]) -> str:
+        """
+        Determine the direction of the email communication.
+        
+        Returns:
+            str: "INBOUND" (to company), "OUTBOUND" (from company), "INTERNAL", or "EXTERNAL"
+        """
+        sender_is_company = sender_domain in self.company_domains
+        recipients_include_company = any(domain in self.company_domains for domain in recipient_domains)
+        
+        if sender_is_company and not recipients_include_company:
+            return "OUTBOUND"  # Company sending to outside
+        elif not sender_is_company and recipients_include_company:
+            return "INBOUND"   # Outside sending to company
+        elif sender_is_company and recipients_include_company:
+            return "INTERNAL"  # Within company
+        else:
+            return "EXTERNAL"  # Outside to outside (unusual case)
     
     def _analyze_job_indicators(self, domain_analysis: Dict) -> Dict:
         """
@@ -188,6 +260,7 @@ class ManualEmailClassifier:
         
         # Example confidence threshold
         self.confidence_threshold = 0.7
+        
 
     async def classify_emails(self, batch_size=10,skip=100):
         """Main classification workflow"""
@@ -211,13 +284,20 @@ class ManualEmailClassifier:
                 initial_result = await self._initial_classification(email,domain_analysis)
                 logger.info(f"Initial classification result: {initial_result}")
                 
-                # Step 2: Always do retrieval for additional context
+                if 'uncertainty_points' in initial_result:
+                    uncertainties = initial_result['uncertainty_points']
+                elif 'final_result' in initial_result and 'uncertainty_points' in initial_result['final_result']:
+                    uncertainties = initial_result['final_result']['uncertainty_points']
+                else:
+                    uncertainties = []
+
+                # Now pass uncertainties to _retrieve_related_context
                 retrieved_context = await self._retrieve_related_context(
                     email.body,
                     email.subject,
                     email.sender_email,
                     email.recipients,
-                    initial_result['uncertainty_points']
+                    uncertainties
                 )
                 logger.info(f"Retrieved context: {retrieved_context}")
                 
@@ -282,7 +362,55 @@ class ManualEmailClassifier:
 
     async def _initial_classification(self, email,domain_analysis) -> dict:
         """Get initial classification with uncertainty detection"""
+        
+        if domain_analysis.get('is_self_addressed', False):
+            # Wrap the result in the expected structure with iterations
+            return {
+                "final_result": {
+                    "category": "OTHERS", 
+                    "confidence": 0.95,
+                    "uncertainty_points": [],
+                    "rationale": "Self-addressed email (likely template, draft, or test)"
+                },
+                "iterations": [{
+                    "iteration": 0,
+                    "classification": {
+                        "category": "OTHERS", 
+                        "confidence": 0.95,
+                        "uncertainty_points": [],
+                        "rationale": "Self-addressed email (likely template, draft, or test)"
+                    },
+                    "questions": None,
+                    "additional_context": None
+                }],
+                "total_iterations": 0
+            }
+    
+        # Then check if this is likely a vendor email
+        if domain_analysis['is_likely_vendor_email']:
+            # Wrap the result in the expected structure with iterations
+            return {
+                "final_result": {
+                    "category": "OTHERS",
+                    "confidence": 0.9,
+                    "uncertainty_points": [],
+                    "rationale": "Email identified as vendor communication (invoice/billing/subscription)"
+                },
+                "iterations": [{
+                    "iteration": 0,
+                    "classification": {
+                        "category": "OTHERS",
+                        "confidence": 0.9,
+                        "uncertainty_points": [],
+                        "rationale": "Email identified as vendor communication (invoice/billing/subscription)"
+                    },
+                    "questions": None,
+                    "additional_context": None
+                }],
+                "total_iterations": 0
+            }
         prompt = f"""You are an email classifier for ProficientNow, a recruitment company. Your task is to classify emails according to our sales pipeline stages while considering our detailed business context.
+        
 
         Email Domain Analysis:
         - Sender domain: {domain_analysis['sender_domain']}
@@ -427,6 +555,53 @@ class ManualEmailClassifier:
 
     async def _final_classification(self, email_body: str, context: str, initial_result: dict,domain_analysis) -> dict:
         """Make final classification with retrieved context"""
+
+        if domain_analysis.get('is_self_addressed', False):
+            # Wrap the result in the expected structure with iterations
+            return {
+                "final_result": {
+                    "category": "OTHERS", 
+                    "confidence": 0.95,
+                    "uncertainty_points": [],
+                    "rationale": "Self-addressed email (likely template, draft, or test)"
+                },
+                "iterations": [{
+                    "iteration": 0,
+                    "classification": {
+                        "category": "OTHERS", 
+                        "confidence": 0.95,
+                        "uncertainty_points": [],
+                        "rationale": "Self-addressed email (likely template, draft, or test)"
+                    },
+                    "questions": None,
+                    "additional_context": None
+                }],
+                "total_iterations": 0
+            }
+    
+        # Then check if this is likely a vendor email
+        if domain_analysis['is_likely_vendor_email']:
+            # Wrap the result in the expected structure with iterations
+            return {
+                "final_result": {
+                    "category": "OTHERS",
+                    "confidence": 0.9,
+                    "uncertainty_points": [],
+                    "rationale": "Email identified as vendor communication (invoice/billing/subscription)"
+                },
+                "iterations": [{
+                    "iteration": 0,
+                    "classification": {
+                        "category": "OTHERS",
+                        "confidence": 0.9,
+                        "uncertainty_points": [],
+                        "rationale": "Email identified as vendor communication (invoice/billing/subscription)"
+                    },
+                    "questions": None,
+                    "additional_context": None
+                }],
+                "total_iterations": 0
+            }
         base_prompt = f"""You are an expert email classifier for ProficientNow's recruitment pipeline. 
         Your task is to analyze this email and determine its category with high confidence.
 
@@ -484,9 +659,12 @@ class ManualEmailClassifier:
         - Detailed requirement gathering from client
         - Business Development Manager involvement
         - Specific position requirements from client
+        - Early discussions about potential business relationships
+        - Initial negotiations about terms BEFORE a contract is drafted
+        - Conversations about warranty periods and fee structures
+        - Discussions that indicate interest but no firm commitment yet
         MUST NOT HAVE:
         - Candidate communication
-        - Contract discussions
         EXAMPLES:
         - "Please share your detailed requirements"
         - "Our BDM will contact you"
@@ -503,28 +681,56 @@ class ManualEmailClassifier:
 
         5. DEAL
         MUST HAVE:
-        - Contract discussions
+        - Final Contract discussions
         - Payment terms
         - Service agreements
+        - Formal contract drafts being exchanged
+        - Final negotiations on legal terms with intent to sign
+        - Clear indication both parties have committed to work together
+        - Specific contract language being discussed
         MUST NOT HAVE:
         - Job descriptions
         - Candidate communication
         EXAMPLES:
-        - "Please review the contract terms"
+        - "Please review the final contract terms"
         - "Here are our payment milestones"
 
+        
         6. SALE
-        MUST HAVE:
-        - Offer letters
-        - Joining confirmations
-        - Payment processing
+        MUST HAVE at least ONE:
+        - Confirmed candidate placements
+        - Offer letters issued and accepted
+        - Candidate joining confirmations
+        - Invoice generation TO CLIENTS
+        - Payment collection FROM CLIENTS
+        - Post-placement follow-up
         MUST NOT HAVE:
-        - Initial job descriptions
-        - Service discussions
+        - Contract negotiations
+        - Early stage discussions
+        KEY INDICATORS:
+        - Content: Placement confirmations, invoices to clients
+        - Pattern: Post-deal operational communications
+        - Intent: Managing active placements, collecting revenue
         EXAMPLES:
-        - "Congratulations on your offer"
-        - "Please find your joining letter"
-        7. OTHERS: Generic, Irrelevant, Auto-generated emails
+        - "The candidate has accepted and will join on March 1st"
+        - "Please find attached the invoice for the placement"
+        - "We've confirmed the start date for the candidate"
+        - "Following up on our placed candidate's performance"
+        7. OTHERS
+        This includes:
+        - Vendor invoices TO our company
+        - Subscription notices FROM external services
+        - Administrative emails unrelated to recruitment
+        - Auto-generated notifications
+        - Internal operations unrelated to specific deals
+        EXAMPLES:
+        - "Your subscription payment is due"
+        - "Invoice from [Vendor] to ProficientNow"
+        - "Office closure notification"
+
+        IMPORTANT FOR INVOICE EMAILS:
+        - If WE are sending an invoice TO a CLIENT for our services = SALE
+        - If a VENDOR is sending an invoice TO US for their services = OTHERS
 
         Based on similar emails and business context, re-evaluate the classification and return a JSON with:
         - category: (ONE of: PROSPECT, LEAD_GENERATION, OPPORTUNITY, FULFILLMENT, DEAL, SALE)
