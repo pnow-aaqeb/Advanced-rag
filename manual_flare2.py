@@ -8,7 +8,7 @@ from langchain.embeddings.base import Embeddings
 from transformers import AutoTokenizer, AutoModel
 import html2text
 from bge_singleton import BGEEmbeddings
-from mongodb import mongodb
+
 # from email_processor import BGEEmbeddings
 logger = logging.getLogger(__name__)
 business_context=''' ProficientNow Sales Pipeline Stages
@@ -259,7 +259,7 @@ class ManualEmailClassifier:
         self.confidence_threshold = 0.7
         
 
-    async def classify_emails(self, batch_size=10,skip=100,save_immediately=True):
+    async def classify_emails(self, batch_size=10,skip=100):
         """Main classification workflow"""
         try:
             emails = await self._get_unprocessed_emails(batch_size,skip)
@@ -319,63 +319,35 @@ class ManualEmailClassifier:
                         if email_data:
                             similar_emails.append(email_data)
 
-                            email_result = {
-                            "email_details": {
-                                "id": email.id,
-                                "subject": email.subject,
-                                "sender": email.sender_email,
-                                "recipients": email.recipients,
-                                "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
-                                "body": text_body
-                            },
-                            "domain_analysis": domain_analysis,
-                            "initial_classification": initial_result,
-                            "similar_emails": similar_emails,
-                            "classification_process": {
-                                "iterations": final_result["iterations"],
-                                "total_iterations": final_result["total_iterations"],
-                                "final_result": final_result["final_result"]
-                            },
-                            "status": "success"
-                        }
-                
-                # Save each email's result individually if requested
-                if save_immediately:
-                    try:
-                        # Prepare single result for MongoDB
-                        mongo_result = {
-                            "status": "success",
-                            "results": [email_result],
-                            "total_processed": 1,
-                            "next_skip": skip + batch_size  # This will be the same for all emails in batch
-                        }
-                        
-                        # Save to MongoDB
-                        result_id = await mongodb.save_classification_result(mongo_result)
-                        saved_ids.append(result_id)
-                        logger.info(f"Saved result for email {email.id} to MongoDB: {result_id}")
-                    except Exception as mongo_error:
-                        logger.error(f"MongoDB save error for email {email.id}: {str(mongo_error)}")
-                
+                email_result = {
+                    "email_details": {
+                        "id": email.id,
+                        "subject": email.subject,
+                        "sender": email.sender_email,
+                        "recipients": email.recipients,
+                        "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                        "body": text_body
+                    },
+                    "domain_analysis": domain_analysis,
+                    "initial_classification": initial_result,
+                    "similar_emails": similar_emails,
+                    "classification_process": {
+                        "iterations": final_result["iterations"],
+                        "total_iterations": final_result["total_iterations"],
+                        "final_result": final_result["final_result"]
+                    },
+                    "status": "success"
+                }
+            
                 classification_results.append(email_result)
                 
                 # Step 4: Update with final category
                 await self._update_email_category(email.id, final_result["final_result"]["category"])
-        
-            if save_immediately:
-                return {
-                    "status": "success",
-                    "result_ids": saved_ids,
-                    "total_processed": len(saved_ids),
-                    "message": "Classification completed and saved to database individually"
-                }
-            else:
-                return {
-                    "status": "success",
-                    "results": classification_results,
-                    "total_processed": len(classification_results)
-                }
-                
+            return {
+                "status": "success",
+                "results": classification_results,
+                "total_processed": len(classification_results)
+            }
                     
         except Exception as e:
             logger.error(f"Error during email classification: {str(e)}")
@@ -552,9 +524,9 @@ class ManualEmailClassifier:
 
             return "\n".join(unique_pieces[:10]) if unique_pieces else "No similar emails found."
         
-        except Exception as e:
-            logger.error(f"Error in _retrieve_related_context: {str(e)}", exc_info=True)
-            return "Error retrieving similar emails"
+    except Exception as e:
+        logger.error(f"Error in _retrieve_related_context: {str(e)}", exc_info=True)
+        return "Error retrieving similar emails"
 
     async def _final_classification(self, email_body: str, context: str, initial_result: dict,domain_analysis) -> dict:
         """Make final classification with retrieved context"""
@@ -925,18 +897,18 @@ class ManualEmailClassifier:
         
         return text.strip()
 
-    async def _get_unprocessed_emails(self, batch_size: int, skip: int):
+    async def _get_unprocessed_emails(self, batch_size: int,skip:int):
         """Retrieve unprocessed emails from database"""
         try:
-            # No need to connect/disconnect here since it's managed in the task
+            await self.prisma.connect()
             return await self.prisma.messages.find_many(
                 skip=skip,
                 take=batch_size,
                 order={'sent_date_time': 'desc'}
             )
+            await self.prisma.disconnect()
         except Exception as e:
-            logger.error(f"Error fetching messages: {str(e)}")
-            raise
+            logger.error(f"error fetching messages:{str(e)}")
 
     async def _update_email_category(self, email_id: str, category: str):
         """Update database with classification result"""
