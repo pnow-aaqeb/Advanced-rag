@@ -73,28 +73,30 @@ async def save_results(new_results):
         logger.error(f"Failed to save results: {str(e)}")
         raise
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     """
-#     Handles application startup and shutdown events.
-#     Manages database connections and cleanup.
-#     """
-#     # Startup
-#     await prisma.connect()
-#     logger.info("Connected to Prisma database")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles application startup and shutdown events.
+    Manages database connections and cleanup.
+    """
+    # Startup
+    try:
+        
+        await mongodb.connect() 
+        logger.info("Connected to MongoDB database")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {str(e)}")
+       
     
-#     # Initialize Pinecone index
-#     index = pc.Index("email-embeddings")
-#     logger.info("Connected to Pinecone index")
+    yield
     
-#     yield
-    
-#     # Shutdown
-#     await prisma.disconnect()
-#     logger.info("Disconnected from Prisma database")
+    # Shutdown
+    # Close MongoDB connection
+    await mongodb.disconnect()  # Add this method to your MongoDB class
+    logger.info("Disconnected from MongoDB database")
 
 # Create FastAPI app
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 # Configure CORS
 app.add_middleware(
@@ -222,15 +224,17 @@ async def process_email_batches(total_emails: int = 50, batch_size: int = 10, sk
         task_ids = []
         
         # Start tasks for each batch
+        original_skip = skip  
         for i in range(num_batches):
-            skip = i * batch_size
-            task = classify_email_batch.delay(batch_size, skip)
+            current_skip = original_skip + (i * batch_size)  # Use original skip as base
+            task = classify_email_batch.delay(batch_size, current_skip)
             task_ids.append(task.id)
             
         return {
             "status": "processing",
             "task_ids": task_ids,
-            "message": f"Started processing {num_batches} batches"
+            "message": f"Started processing {num_batches} batches",
+            "next_skip": original_skip + (num_batches * batch_size)  # Calculate next skip correctly
         }
         
     except Exception as e:
@@ -248,7 +252,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 @app.get("/classification-results")
-async def get_classification_results(skip: int = 0, limit: int = 100):
+async def get_classification_results(skip: int = 0, limit: int = 500):
     try:
         # Log the query parameters
         logger.info(f"Querying MongoDB with skip={skip}, limit={limit}")
@@ -261,7 +265,7 @@ async def get_classification_results(skip: int = 0, limit: int = 100):
         logger.info(f"Total documents in collection: {total_docs}")
         
         # Perform the query with detailed logging
-        results = await mongodb.get_classification_results()
+        results = await mongodb.get_classification_results(skip=skip, limit=limit)
         logger.info(f"Retrieved {len(results)} results from MongoDB")
         
         # Log a sample document if available

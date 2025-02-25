@@ -7,9 +7,20 @@ from typing import Dict, List, Optional, Any
 
 class MongoDB:
     def __init__(self):
+        self.client = None
+        self.db = None
+        self.results = None
+    async def connect(self):
+        """Establish connection to MongoDB"""
         self.client = AsyncIOMotorClient(os.getenv('MONGODB_URI'))
         self.db = self.client.email_classification
         self.results = self.db.classification_results
+        # Test connection
+        await self.db.command('ping')
+    
+    async def disconnect(self):
+        """Close MongoDB connection"""
+        self.client.close()
 
     async def save_classification_result(self, result: dict) -> str:
         """

@@ -24,6 +24,8 @@ def classify_email_batch(batch_size: int, skip: int) -> Dict[str, Any]:
             try:
                 if not prisma.is_connected():
                     await prisma.connect()
+                if mongodb.db is None:
+                    await mongodb.connect()
                 
                 classifier = ManualEmailClassifier(
                     prisma_client=prisma,
@@ -45,45 +47,45 @@ def classify_email_batch(batch_size: int, skip: int) -> Dict[str, Any]:
                     logger.error(f"Classification error: {result.get('message')}")
                     return result
                 
-                try:
-                    # Save each result in the batch to MongoDB
-                    saved_ids = []
-                    if result.get("results"):
-                        # Prepare batch result for MongoDB
-                        mongo_result = {
-                            "status": result.get("status"),
-                            "results": result.get("results", []),
-                            "total_processed": result.get("total_processed", 0),
-                            "next_skip": result.get("next_skip")
-                        }
+                # try:
+                #     # Save each result in the batch to MongoDB
+                #     saved_ids = []
+                #     if result.get("results"):
+                #         # Prepare batch result for MongoDB
+                #         mongo_result = {
+                #             "status": result.get("status"),
+                #             "results": result.get("results", []),
+                #             "total_processed": result.get("total_processed", 0),
+                #             "next_skip": result.get("next_skip")
+                #         }
                         
-                        # Save to MongoDB
-                        result_id = await mongodb.save_classification_result(mongo_result)
-                        saved_ids.append(result_id)
+                #         # Save to MongoDB
+                #         result_id = await mongodb.save_classification_result(mongo_result)
+                #         saved_ids.append(result_id)
                         
-                        logger.info(f"Saved {len(saved_ids)} results to MongoDB")
+                #         logger.info(f"Saved {len(saved_ids)} results to MongoDB")
                         
-                        # Return success response with saved IDs
-                        return {
-                            "status": "success",
-                            "result_ids": saved_ids,
-                            "total_processed": len(saved_ids),
-                            "message": "Classification completed and saved to database"
-                        }
-                    else:
-                        return {
-                            "status": "no_results",
-                            "message": "No valid results to save"
-                        }
+                #         # Return success response with saved IDs
+                #         return {
+                #             "status": "success",
+                #             "result_ids": saved_ids,
+                #             "total_processed": len(saved_ids),
+                #             "message": "Classification completed and saved to database"
+                #         }
+                #     else:
+                #         return {
+                #             "status": "no_results",
+                #             "message": "No valid results to save"
+                #         }
                 
-                except Exception as mongo_error:
-                    logger.error(f"MongoDB save error: {str(mongo_error)}")
-                    # Return original results if MongoDB save fails
-                    return {
-                        "status": "error",
-                        "message": f"Failed to save to database: {str(mongo_error)}",
-                        "results": result.get("results", [])
-                    }
+                # except Exception as mongo_error:
+                #     logger.error(f"MongoDB save error: {str(mongo_error)}")
+                #     # Return original results if MongoDB save fails
+                #     return {
+                #         "status": "error",
+                #         "message": f"Failed to save to database: {str(mongo_error)}",
+                #         "results": result.get("results", [])
+                #     }
                 
             except Exception as e:
                 logger.error(f"Error in process_batch: {str(e)}")

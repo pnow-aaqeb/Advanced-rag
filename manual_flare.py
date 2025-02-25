@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+import re
 import torch
 import numpy as np
 from typing import List, Tuple, Optional,Dict
@@ -69,6 +70,7 @@ class EmailDomainAnalyzer:
         # Known company domains (can be expanded)
         self.company_domains = {
             'proficientnow.com',
+            'proficientnowbooks.com',
             # Add other known company domains here
         }
         
@@ -76,7 +78,13 @@ class EmailDomainAnalyzer:
         self.generic_domains = {
             'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 
             'aol.com', 'icloud.com', 'protonmail.com', 'mail.com',
-            'inbox.com', 'live.com', 'msn.com', 'ymail.com'
+            'inbox.com', 'live.com', 'msn.com', 'ymail.com','me.com'
+        }
+
+        
+        self.non_business_company_domains = {
+            'proficientnowbooks.com',  
+            'proficientnowtech.com',   
         }
 
         self.vendor_domains = {
@@ -98,6 +106,27 @@ class EmailDomainAnalyzer:
             'quickbooks.intuit.com'
             # Add more vendor domains as identified
         }
+
+        self.employee_mappings = {
+            'rmartin.pfn@icloud.com': 'rmartin@proficientnow.com',
+        }
+
+        self.employee_usernames = self._build_employee_usernames()
+        
+    def _build_employee_usernames(self) -> Dict[str, str]:
+        """Build a mapping of usernames to full company emails for partial matching"""
+        username_map = {}
+        
+        # Add mappings from employee_mappings
+        for personal, company in self.employee_mappings.items():
+            try:
+                company_username = company.split('@')[0].lower()
+                username_map[company_username] = company
+            except (IndexError, AttributeError):
+                continue
+                
+        
+        return username_map
         
     def is_self_addressed_email(self, sender_email: str, recipients: List[Dict]) -> bool:
         """
@@ -110,7 +139,79 @@ class EmailDomainAnalyzer:
         recipient_emails = [r['emailAddress']['address'].lower() 
                         for r in recipients if 'emailAddress' in r]
                         
-        return sender_email.lower() in recipient_emails and len(recipient_emails) == 1
+        # Direct self-addressed check
+        if sender_email.lower() in recipient_emails and len(recipient_emails) == 1:
+            return True
+            
+        # NEW: Check for personal to company email or vice versa (same person)
+        sender_lower = sender_email.lower()
+        
+        # Check if sender's personal email matches a recipient's company email
+        if sender_lower in self.employee_mappings:
+            company_email = self.employee_mappings[sender_lower]
+            if company_email.lower() in recipient_emails and len(recipient_emails) == 1:
+                return True
+                
+        # Check if sender's company email matches a recipient's personal email
+        for personal, company in self.employee_mappings.items():
+            if sender_lower == company.lower() and personal.lower() in recipient_emails and len(recipient_emails) == 1:
+                return True
+                
+        # NEW: Check for username pattern matching
+        try:
+            sender_username = sender_lower.split('@')[0]
+            
+            # Check for username pattern in recipients
+            for recipient in recipient_emails:
+                try:
+                    recipient_username = recipient.split('@')[0]
+                    
+                    # If usernames match and domains are different, likely same person
+                    if sender_username == recipient_username and sender_lower != recipient:
+                        return True
+                except (IndexError, AttributeError):
+                    continue
+        except (IndexError, AttributeError):
+            pass
+            
+        return False
+    def is_likely_internal_communication(self, sender_email: str, recipients: List[Dict]) -> bool:
+        """
+        NEW: Check if this is likely communication between company employees,
+        even if using personal emails.
+        """
+        if not sender_email or not recipients:
+            return False
+            
+        sender_lower = sender_email.lower()
+        recipient_emails = []
+        for r in recipients:
+            if 'emailAddress' in r:
+                email = r['emailAddress']['address'].lower()
+                recipient_emails.append(email)
+        
+        # Check if sender is using a known personal email for an employee
+        sender_is_employee = False
+        if sender_lower in self.employee_mappings:
+            sender_is_employee = True
+        elif any(d for d in self.company_domains if d in sender_lower):
+            sender_is_employee = True
+            
+        # Also check if recipient includes company addresses or known employee personal emails
+        recipient_has_employee = False
+        for recipient in recipient_emails:
+            # Direct company domain check
+            if any(d for d in self.company_domains if d in recipient):
+                recipient_has_employee = True
+                break
+                
+            # Check for known personal emails of employees
+            if recipient in self.employee_mappings:
+                recipient_has_employee = True
+                break
+                
+        # If both sender and at least one recipient are employees, it's internal
+        return sender_is_employee and recipient_has_employee
 
     def analyze_email_addresses(self, sender_email: str, recipients: List[Dict]) -> Dict:
         """
@@ -125,33 +226,58 @@ class EmailDomainAnalyzer:
         """
         # Extract domains
         sender_domain = self._extract_domain(sender_email)
-        recipient_domains = [self._extract_domain(r['emailAddress']['address']) 
-                           for r in recipients if 'emailAddress' in r]
+        recipient_domains = []
+        for r in recipients:
+            if 'emailAddress' in r:
+                email = r['emailAddress']['address']
+                domain = self._extract_domain(email)
+                recipient_domains.append(domain)
+        
+        # NEW: Check if sender is using a non-business company domain
+        sender_is_non_business = sender_domain in self.non_business_company_domains
         
         # Initialize analysis dict FIRST before referencing it
         analysis = {
             'sender_is_company': sender_domain in self.company_domains,
+            'sender_is_non_business_company_domain': sender_is_non_business,
             'sender_is_generic': sender_domain in self.generic_domains,
             'sender_is_vendor': sender_domain in self.vendor_domains,
             'sender_domain': sender_domain,
             'recipient_domains': list(set(recipient_domains)),
             'recipient_analysis': {
                 'company_domains': len([d for d in recipient_domains if d in self.company_domains]),
+                'non_business_domains': len([d for d in recipient_domains if d in self.non_business_company_domains]),
                 'generic_domains': len([d for d in recipient_domains if d in self.generic_domains]),
                 'vendor_domains': len([d for d in recipient_domains if d in self.vendor_domains]),
                 'other_domains': len([d for d in recipient_domains 
                                     if d not in self.company_domains 
+                                    and d not in self.non_business_company_domains
                                     and d not in self.generic_domains
                                     and d not in self.vendor_domains])
             },
             'email_direction': self._determine_email_direction(sender_domain, recipient_domains),
             'is_likely_candidate_email': False,
             'is_likely_vendor_email': False,
+            'is_likely_non_business': sender_is_non_business or any(d in self.non_business_company_domains for d in recipient_domains),
             'is_self_addressed': self.is_self_addressed_email(sender_email, recipients),
+            'is_internal_communication': self.is_likely_internal_communication(sender_email, recipients),
             'confidence': 0.0,
             'reasoning': []
         }
         
+        # NEW: Special handling for non-business company domains
+        if analysis['is_likely_non_business']:
+            analysis['reasoning'].append("Email involves non-business company domain (should be classified as OTHERS)")
+            analysis['confidence'] += 0.9
+        
+        # NEW: Check if personal email is being used by company employee
+        if sender_email.lower() in self.employee_mappings:
+            analysis['sender_is_company_employee_personal_email'] = True
+            analysis['personal_to_company_mapping'] = self.employee_mappings[sender_email.lower()]
+            analysis['reasoning'].append("Sender using known personal email that maps to company email")
+        else:
+            analysis['sender_is_company_employee_personal_email'] = False
+            
         # Now add reasoning based on patterns
         if analysis['sender_is_vendor']:
             analysis['reasoning'].append("Email from a known vendor domain")
@@ -180,6 +306,10 @@ class EmailDomainAnalyzer:
             analysis['reasoning'].append("Email sent from a person to themselves (likely a template or test)")
             analysis['confidence'] += 0.8
             
+        if analysis['is_internal_communication']:
+            analysis['reasoning'].append("Communication between company employees (internal)")
+            analysis['confidence'] += 0.6
+            
         # Analyze job-related content indicators
         analysis['job_related_indicators'] = self._analyze_job_indicators(analysis)
         
@@ -194,7 +324,8 @@ class EmailDomainAnalyzer:
         """
         sender_is_company = sender_domain in self.company_domains
         recipients_include_company = any(domain in self.company_domains for domain in recipient_domains)
-        
+        if sender_domain in self.non_business_company_domains or any(domain in self.non_business_company_domains for domain in recipient_domains):
+            return "NON_BUSINESS"
         if sender_is_company and not recipients_include_company:
             return "OUTBOUND"  # Company sending to outside
         elif not sender_is_company and recipients_include_company:
@@ -244,6 +375,80 @@ class EmailDomainAnalyzer:
 #     def embed_query(self, text: str) -> List[float]:
 #         return self._get_embedding(text)
 
+class EmailContentProcessor:
+    """NEW: Class to handle email content processing and cleaning"""
+    
+    @staticmethod
+    def clean_and_extract_recent_email(html_content: str) -> Tuple[str, bool]:
+        """
+        Extracts the most recent email from a thread and cleans the content.
+        
+        Args:
+            html_content: Raw HTML email content
+            
+        Returns:
+            Tuple containing:
+                - Cleaned and extracted text
+                - Boolean indicating if content is empty/invalid
+        """
+        if not html_content:
+            return "", True
+            
+        # Convert HTML to text
+        h = html2text.HTML2Text()
+        h.ignore_images = True
+        h.ignore_links = False  # Keep links for better context
+        h.ignore_tables = False  # Keep tables for better structure
+        h.body_width = 0  # Don't wrap lines
+        
+        text = h.handle(html_content)
+        
+        # Check if content is still empty after conversion
+        if not text or text.isspace():
+            return "", True
+            
+        # Try to extract just the most recent email from the thread
+        # Common patterns for quoted content/previous emails
+        patterns = [
+            r'From:.*?Subject:.*?\n\n',  # Standard email header pattern
+            r'On.*?wrote:',  # Common reply pattern
+            r'Begin forwarded message:',  # Forwarded message marker
+            r'-+Original Message-+',  # Another common separator
+            r'>.*',  # Quoted content (lines starting with >)
+            r'From: .*\[mailto:.*\]',  # Outlook-style headers
+            r'\*From:\*',  # Some HTML to text conversions
+            r'______+',  # Horizontal lines often separate messages
+            r'On\s+.*?,\s+.*?\s+wrote:',  # Gmail-style reply headers
+        ]
+        
+        # Try to find the first occurrence of any pattern
+        positions = []
+        for pattern in patterns:
+            matches = list(re.finditer(pattern, text, re.MULTILINE | re.DOTALL))
+            for match in matches:
+                positions.append(match.start())
+        
+        # If we found separators, extract content before the first one
+        if positions:
+            first_pos = min(positions)
+            recent_content = text[:first_pos].strip()
+            
+            # If we have content, return it
+            if recent_content:
+                return recent_content, False
+        
+        # Clean up the full text if we can't extract just the recent part
+        # Remove quoted lines (starting with >)
+        lines = text.splitlines()
+        clean_lines = [line for line in lines if not line.strip().startswith('>')]
+        
+        # Rejoin and clean up whitespace
+        cleaned_text = '\n'.join(clean_lines)
+        cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)  # Replace multiple newlines
+        cleaned_text = cleaned_text.strip()
+        
+        return cleaned_text, not bool(cleaned_text)
+
 class ManualEmailClassifier:
     def __init__(self, prisma_client, pinecone_index, openai_client):
         self.prisma = prisma_client
@@ -252,34 +457,161 @@ class ManualEmailClassifier:
         self.embeddings = BGEEmbeddings()
         self.categories = [
             "PROSPECT", "LEAD_GENERATION", "OPPORTUNITY",
-            "FULFILLMENT", "DEAL", "SALE"
+            "FULFILLMENT", "DEAL", "SALE","OTHERS"
         ]
         
         # Example confidence threshold
         self.confidence_threshold = 0.7
         
 
-    async def classify_emails(self, batch_size=10,skip=100,save_immediately=True):
+    
+    async def classify_emails(self, batch_size=10, skip=100, save_immediately=True):
         """Main classification workflow"""
         try:
-            emails = await self._get_unprocessed_emails(batch_size,skip)
+            emails = await self._get_unprocessed_emails(batch_size, skip)
             if not emails:
                 return {"status": "no_emails", "message": "No unprocessed emails found"}
             
             classification_results = []
+            saved_ids = []
             
             for email in emails:
-                # Step 1: Initial classification
+                # Step 1: Process domain first to check for non-business domains
+                domain_analyzer = EmailDomainAnalyzer()
+                domain_analysis = domain_analyzer.analyze_email_addresses(
+                    email.sender_email,
+                    email.recipients
+                )
+                
+                # NEW: Check for non-business company domains first
+                if domain_analysis.get('is_likely_non_business', False):
+                    logger.info(f"Email using non-business domain detected: {domain_analysis['sender_domain']}")
+                    non_business_result = {
+                        "email_details": {
+                            "id": email.id,
+                            "subject": email.subject,
+                            "sender": email.sender_email,
+                            "recipients": email.recipients,
+                            "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                            "body": "NON-BUSINESS DOMAIN"
+                        },
+                        "domain_analysis": domain_analysis,
+                        "classification_process": {
+                            "final_result": {
+                                "category": "OTHERS",
+                                "confidence": 0.98,
+                                "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
+                            }
+                        },
+                        "status": "success"
+                    }
+                    classification_results.append(non_business_result)
+                    
+                    # Save non-business email result if requested
+                    if save_immediately:
+                        mongo_result = {
+                            "status": "success",
+                            "results": [non_business_result],
+                            "total_processed": 1,
+                            "next_skip": skip + batch_size
+                        }
+                        result_id = await mongodb.save_classification_result(mongo_result)
+                        saved_ids.append(result_id)
+                    
+                    # Update email category
+                    await self._update_email_category(email.id, "OTHERS")
+                    continue
+                
+                # NEW: Check if email body is empty
+                if not email.body or email.body.isspace():
+                    logger.warning(f"Empty email body detected for email ID: {email.id}")
+                    empty_result = {
+                        "email_details": {
+                            "id": email.id,
+                            "subject": email.subject,
+                            "sender": email.sender_email,
+                            "recipients": email.recipients,
+                            "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                            "body": "EMPTY"
+                        },
+                        "classification_process": {
+                            "final_result": {
+                                "category": "OTHERS",
+                                "confidence": 0.95,
+                                "rationale": "Email has empty body content"
+                            }
+                        },
+                        "status": "success"
+                    }
+                    classification_results.append(empty_result)
+                    
+                    # Save empty email result if requested
+                    if save_immediately:
+                        mongo_result = {
+                            "status": "success",
+                            "results": [empty_result],
+                            "total_processed": 1,
+                            "next_skip": skip + batch_size
+                        }
+                        result_id = await mongodb.save_classification_result(mongo_result)
+                        saved_ids.append(result_id)
+                    
+                    # Update email category
+                    await self._update_email_category(email.id, "OTHERS")
+                    continue
+                
+                # Step 1: Process and clean the email body
+                email_processor = EmailContentProcessor()
+                text_body, is_empty = email_processor.clean_and_extract_recent_email(email.body)
+                
+                # Handle empty content after cleaning
+                if is_empty:
+                    logger.warning(f"Email body empty after cleaning for email ID: {email.id}")
+                    empty_result = {
+                        "email_details": {
+                            "id": email.id,
+                            "subject": email.subject,
+                            "sender": email.sender_email,
+                            "recipients": email.recipients,
+                            "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                            "body": "EMPTY AFTER CLEANING"
+                        },
+                        "classification_process": {
+                            "final_result": {
+                                "category": "OTHERS",
+                                "confidence": 0.95,
+                                "rationale": "Email has no meaningful content after cleaning"
+                            }
+                        },
+                        "status": "success"
+                    }
+                    classification_results.append(empty_result)
+                    
+                    if save_immediately:
+                        mongo_result = {
+                            "status": "success",
+                            "results": [empty_result],
+                            "total_processed": 1,
+                            "next_skip": skip + batch_size
+                        }
+                        result_id = await mongodb.save_classification_result(mongo_result)
+                        saved_ids.append(result_id)
+                    
+                    await self._update_email_category(email.id, "OTHERS")
+                    continue
+                
+                # Step 2: Initial classification with domain analysis
                 domain_analyzer = EmailDomainAnalyzer() 
                 domain_analysis = domain_analyzer.analyze_email_addresses(
-                email.sender_email,
-                email.recipients
+                    email.sender_email,
+                    email.recipients
                 )
-                # logger.info(f"Domain analysis result: {domain_analysis}")
-                text_body=self._html_to_text(email.body)
-                print(f"email body:{text_body}")
-                initial_result = await self._initial_classification(email,domain_analysis)
-                logger.info(f"Initial classification result: {initial_result}")
+                
+                # Log the final cleaned text and domain analysis
+                logger.info(f"Cleaned email body: {text_body[:200]}...")
+                logger.info(f"Domain analysis result: {domain_analysis}")
+                
+                initial_result = await self._initial_classification(email, domain_analysis, text_body)
                 
                 if 'uncertainty_points' in initial_result:
                     uncertainties = initial_result['uncertainty_points']
@@ -288,9 +620,9 @@ class ManualEmailClassifier:
                 else:
                     uncertainties = []
 
-                # Now pass uncertainties to _retrieve_related_context
+                # Step 3: Retrieve related context
                 retrieved_context = await self._retrieve_related_context(
-                    email.body,
+                    text_body,
                     email.subject,
                     email.sender_email,
                     email.recipients,
@@ -298,7 +630,7 @@ class ManualEmailClassifier:
                 )
                 logger.info(f"Retrieved context: {retrieved_context}")
                 
-                # Step 3: Final classification with context
+                # Step 4: Final classification with context
                 final_result = await self._final_classification(
                     text_body, 
                     retrieved_context,
@@ -319,25 +651,25 @@ class ManualEmailClassifier:
                         if email_data:
                             similar_emails.append(email_data)
 
-                            email_result = {
-                            "email_details": {
-                                "id": email.id,
-                                "subject": email.subject,
-                                "sender": email.sender_email,
-                                "recipients": email.recipients,
-                                "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
-                                "body": text_body
-                            },
-                            "domain_analysis": domain_analysis,
-                            "initial_classification": initial_result,
-                            "similar_emails": similar_emails,
-                            "classification_process": {
-                                "iterations": final_result["iterations"],
-                                "total_iterations": final_result["total_iterations"],
-                                "final_result": final_result["final_result"]
-                            },
-                            "status": "success"
-                        }
+                email_result = {
+                    "email_details": {
+                        "id": email.id,
+                        "subject": email.subject,
+                        "sender": email.sender_email,
+                        "recipients": email.recipients,
+                        "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                        "body": text_body
+                    },
+                    "domain_analysis": domain_analysis,
+                    "initial_classification": initial_result,
+                    "similar_emails": similar_emails,
+                    "classification_process": {
+                        "iterations": final_result["iterations"],
+                        "total_iterations": final_result["total_iterations"],
+                        "final_result": final_result["final_result"]
+                    },
+                    "status": "success"
+                }
                 
                 # Save each email's result individually if requested
                 if save_immediately:
@@ -359,7 +691,7 @@ class ManualEmailClassifier:
                 
                 classification_results.append(email_result)
                 
-                # Step 4: Update with final category
+                # Step 5: Update with final category
                 await self._update_email_category(email.id, final_result["final_result"]["category"])
         
             if save_immediately:
@@ -384,8 +716,7 @@ class ManualEmailClassifier:
                 "message": str(e),
                 "results": []
             }
-
-    async def _initial_classification(self, email,domain_analysis) -> dict:
+    async def _initial_classification(self, email, domain_analysis, text_body) -> dict:
         """Get initial classification with uncertainty detection"""
         
         if domain_analysis.get('is_self_addressed', False):
@@ -404,6 +735,29 @@ class ManualEmailClassifier:
                         "confidence": 0.95,
                         "uncertainty_points": [],
                         "rationale": "Self-addressed email (likely template, draft, or test)"
+                    },
+                    "questions": None,
+                    "additional_context": None
+                }],
+                "total_iterations": 0
+            }
+            
+        # NEW: Check for non-business domains
+        if domain_analysis.get('is_likely_non_business', False):
+            return {
+                "final_result": {
+                    "category": "OTHERS", 
+                    "confidence": 0.98,
+                    "uncertainty_points": [],
+                    "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
+                },
+                "iterations": [{
+                    "iteration": 0,
+                    "classification": {
+                        "category": "OTHERS", 
+                        "confidence": 0.98,
+                        "uncertainty_points": [],
+                        "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
                     },
                     "questions": None,
                     "additional_context": None
@@ -434,12 +788,33 @@ class ManualEmailClassifier:
                 }],
                 "total_iterations": 0
             }
+            
+        # NEW: Check for internal communication using personal emails
+        if domain_analysis.get('is_internal_communication', False) and domain_analysis.get('sender_is_company_employee_personal_email', False):
+            logger.info("Detected internal communication using personal email")
+            
+            # We'll still analyze the content, but with this additional context
+            internal_note = "NOTE: This appears to be internal communication between company employees (personal email to company email)"
+            
+        else:
+            internal_note = ""
+            
         prompt = f"""You are an email classifier for ProficientNow, a recruitment company. Your task is to classify emails according to our sales pipeline stages while considering our detailed business context.
         
+        IMPORTANT INSTRUCTIONS:
+        1. Carefully distinguish between candidates ACCEPTING or DECLINING opportunities
+        2. Look for clear indicators like "not interested", "decline", "accept", or "excited to join"
+        3. An offer being extended is NOT the same as an offer being ACCEPTED
+        4. Candidate rejections are FULFILLMENT stage, not SALE stage
+        5. Only classify as SALE if there's explicit acceptance or confirmation of placement
+
+        {internal_note}
 
         Email Domain Analysis:
         - Sender domain: {domain_analysis['sender_domain']}
         - Is likely candidate email: {domain_analysis['is_likely_candidate_email']}
+        - Is internal communication: {domain_analysis.get('is_internal_communication', False)}
+        - Using personal email mapped to company: {domain_analysis.get('sender_is_company_employee_personal_email', False)}
         - Confidence: {domain_analysis['confidence']}
         - Reasoning: {', '.join(domain_analysis['reasoning'])}
         - Job related indicators: {domain_analysis['job_related_indicators']}
@@ -460,7 +835,7 @@ class ManualEmailClassifier:
         Email to Classify:
         From: {email.sender_email}
         Subject: {email.subject}
-        Body: {self._html_to_text(email.body)}
+        Body: {text_body}
 
         Consider the following before classification:
         - Look for key indicators of the pipeline stage in the email content
@@ -469,7 +844,7 @@ class ManualEmailClassifier:
         - Note any ambiguous phrases that could indicate multiple stages
 
         Return JSON format with:
-        - category: (Select ONE stage from: PROSPECT, LEAD_GENERATION, OPPORTUNITY, FULFILLMENT, DEAL, SALE)
+        - category: (Select ONE stage from: PROSPECT, LEAD_GENERATION, OPPORTUNITY, FULFILLMENT, DEAL, SALE, OTHERS)
         - confidence: (0-1 score)
         - uncertainty_points: (list of ambiguous phrases that could affect classification)
         """
@@ -491,7 +866,7 @@ class ManualEmailClassifier:
         
         try:
             recipients_text = ' '.join([r['emailAddress']['address'] for r in recipients])
-            logger.info(f"Processing recipients: {recipients_text}")
+            # logger.info(f"Processing recipients: {recipients_text}")
 
             # Dictionary of email fields to search
             email_fields = {
@@ -556,7 +931,8 @@ class ManualEmailClassifier:
             logger.error(f"Error in _retrieve_related_context: {str(e)}", exc_info=True)
             return "Error retrieving similar emails"
 
-    async def _final_classification(self, email_body: str, context: str, initial_result: dict,domain_analysis) -> dict:
+
+    async def _final_classification(self, email_body: str, context: str, initial_result: dict, domain_analysis) -> dict:
         """Make final classification with retrieved context"""
 
         if domain_analysis.get('is_self_addressed', False):
@@ -575,6 +951,29 @@ class ManualEmailClassifier:
                         "confidence": 0.95,
                         "uncertainty_points": [],
                         "rationale": "Self-addressed email (likely template, draft, or test)"
+                    },
+                    "questions": None,
+                    "additional_context": None
+                }],
+                "total_iterations": 0
+            }
+            
+        # NEW: Check for non-business domains
+        if domain_analysis.get('is_likely_non_business', False):
+            return {
+                "final_result": {
+                    "category": "OTHERS", 
+                    "confidence": 0.98,
+                    "uncertainty_points": [],
+                    "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
+                },
+                "iterations": [{
+                    "iteration": 0,
+                    "classification": {
+                        "category": "OTHERS", 
+                        "confidence": 0.98,
+                        "uncertainty_points": [],
+                        "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
                     },
                     "questions": None,
                     "additional_context": None
@@ -605,8 +1004,28 @@ class ManualEmailClassifier:
                 }],
                 "total_iterations": 0
             }
+            
+        # NEW: Special handling for internal communication using personal emails
+        internal_comm_note = ""
+        if domain_analysis.get('is_internal_communication', False) and domain_analysis.get('sender_is_company_employee_personal_email', False):
+            internal_comm_note = """
+            IMPORTANT: This appears to be internal communication between company employees where at least one person is using a personal email address. 
+            Consider the content carefully to determine if this is:
+            1. A test/template email (category=OTHERS)
+            2. An actual business communication (category based on content)
+            """
+            
         base_prompt = f"""You are an expert email classifier for ProficientNow's recruitment pipeline. 
         Your task is to analyze this email and determine its category with high confidence.
+
+        {internal_comm_note}
+
+        CRITICAL INSTRUCTIONS:
+        1. Carefully distinguish between ACCEPTANCE and REJECTION communications
+        2. Pay special attention to phrases like "not interested", "decline", "reject" - these indicate FULFILLMENT stage
+        3. Only classify as SALE if there is explicit confirmation of ACCEPTANCE, JOINING or PAYMENT
+        4. A job offer being extended is NOT the same as an offer being ACCEPTED
+        5. Verify the actual outcome (acceptance vs rejection) before making your decision
 
         Detailed Business Context:
         {business_context}
@@ -739,6 +1158,7 @@ class ManualEmailClassifier:
         - category: (ONE of: PROSPECT, LEAD_GENERATION, OPPORTUNITY, FULFILLMENT, DEAL, SALE)
         - confidence: (0-1 score)
         - rationale: (Explain why this category best fits, referencing both business context and similar emails found)
+        
         """
 
         response = await self.openai.chat.completions.create(
@@ -748,7 +1168,7 @@ class ManualEmailClassifier:
         )
     
         current_result = json.loads(response.choices[0].message.content)
-        logger.info(f"Initial final classification result: {current_result}")
+        # logger.info(f"Initial final classification result: {current_result}")
 
         iteration_results = [{
             "iteration": 0,
@@ -813,7 +1233,7 @@ class ManualEmailClassifier:
             )
             
             questions = json.loads(questions_response.choices[0].message.content)
-            logger.info(f"Generated questions for iteration {current_iteration + 1}: {questions}")
+            # logger.info(f"Generated questions for iteration {current_iteration + 1}: {questions}")
             
             # Get additional context for each question
             additional_context = []
@@ -841,7 +1261,7 @@ class ManualEmailClassifier:
                             include_metadata=True,
                             include_values=False
                         )
-                        logger.info(f"additional context:{results}")
+                        # logger.info(f"additional context:{results}")
                         
                         if results.get('matches'):
                             additional_context.extend([
@@ -857,9 +1277,22 @@ class ManualEmailClassifier:
 
             Additional Context from Iterative Analysis:
             {chr(10).join(additional_context)}
-
+            
+            COMMON MISCLASSIFICATION PATTERNS TO AVOID:
+            1. DO NOT classify candidate rejections as SALE - these are FULFILLMENT
+            2. DO NOT classify job descriptions sent to candidates as LEAD_GENERATION - these are FULFILLMENT
+            3. DO NOT assume any email mentioning an offer is automatically SALE - check if it was ACCEPTED
+            4. DO NOT classify candidate questions or concerns about a position as SALE - these are FULFILLMENT
+            
+            DOUBLE-CHECK THESE CRITICAL QUESTIONS:
+            1. Is the message showing acceptance or rejection of an opportunity?
+            2. Is a candidate declining interest or expressing interest?
+            3. Are there explicit words like "not interested", "decline", or "pass" in the message?
+            4. Is this communication BETWEEN a recruiter and a candidate (FULFILLMENT) or ABOUT a confirmed placement to a client (SALE)?
+            5. Has the candidate formally accepted the offer and confirmed starting? Only then is it SALE.
+            
             Based on ALL available information, provide your final classification as JSON with:
-            - category: (ONE of: PROSPECT, LEAD_GENERATION, OPPORTUNITY, FULFILLMENT, DEAL, SALE)
+            - category: (ONE of: PROSPECT, LEAD_GENERATION, OPPORTUNITY, FULFILLMENT, DEAL, SALE, OTHERS)
             - confidence: (0-1 score)
             - rationale: (Detailed explanation including how the additional context influenced the decision)
             """
@@ -871,7 +1304,7 @@ class ManualEmailClassifier:
             )
             
             current_result = json.loads(response.choices[0].message.content)
-            logger.info(f"Iteration {current_iteration + 1} result: {current_result}")
+            # logger.info(f"Iteration {current_iteration + 1} result: {current_result}")
 
             iteration_results.append({
             "iteration": current_iteration + 1,
@@ -902,28 +1335,6 @@ class ManualEmailClassifier:
         5. DEAL: Contract negotiations
         6. SALE: Successful placements and payments
         """.strip()
-    def _html_to_text(self, body) -> str:
-        """Clean and format email body text"""
-        h = html2text.HTML2Text()
-        h.ignore_images = True
-        h.ignore_links = True
-        h.ignore_tables = True
-        
-        # Convert HTML to text
-        text = h.handle(body)
-        
-        # Clean up extra whitespace
-        text = ' '.join(text.split())  # Remove multiple spaces
-        
-        # # Extract the most recent email (everything before the first "From:")
-        # if "From:" in text:
-        #     text = text.split("From:")[0].strip()
-        
-        # Additional cleaning if needed
-        text = text.replace("**", "")  # Remove bold markers
-        text = text.replace(">", "")   # Remove quote markers
-        
-        return text.strip()
 
     async def _get_unprocessed_emails(self, batch_size: int, skip: int):
         """Retrieve unprocessed emails from database"""
