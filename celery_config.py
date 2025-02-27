@@ -18,7 +18,7 @@
 #     timezone='UTC',
 #     enable_utc=True,
 #     task_acks_late=True,
-#     worker_prefetch_multiplier=3,
+#     worker_prefetch_multiplier=2,
 #     task_time_limit=3600
 # )
 # celery_config.py
