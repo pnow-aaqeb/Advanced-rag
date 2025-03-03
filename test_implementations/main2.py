@@ -13,8 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from celery.result import AsyncResult
-from celery_config import celery_app
-from tasks import classify_email_batch
+from utils.celery_config import celery_app
+from utils.tasks import classify_email_batch
 
 # Load environment variables and configure logging
 load_dotenv()

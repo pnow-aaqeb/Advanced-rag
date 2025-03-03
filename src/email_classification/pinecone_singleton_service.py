@@ -1,9 +1,10 @@
 import os
 from pinecone import Pinecone
 import logging
-
+from nest.core import Injectable
 logger = logging.getLogger(__name__)
 
+@Injectable
 class PineconeSingleton:
     _instance = None
     _initialized = False
@@ -18,6 +19,8 @@ class PineconeSingleton:
             try:
                 self.pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
                 self.index = self.pc.Index("email-embeddings")
+                if hasattr(self.index, 'connect'):
+                    self.index.connect()
                 logger.info("Successfully initialized Pinecone connection")
                 self._initialized = True
             except Exception as e:

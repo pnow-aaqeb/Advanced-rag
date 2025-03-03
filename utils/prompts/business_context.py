@@ -1,4 +1,4 @@
-business_context=''' ProficientNow Sales Pipeline Stages
+business_context = """ ProficientNow Sales Pipeline Stages
         1. Prospect Stage
         Description:
         Research team finds possible client companies
@@ -50,4 +50,4 @@ business_context=''' ProficientNow Sales Pipeline Stages
         Receipt acknowledgment
         Post-placement follow-up
         Visibility:
-        Fully Visible (through emails and system documentation) ''' 
+        Fully Visible (through emails and system documentation) """

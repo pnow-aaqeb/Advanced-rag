@@ -1,27 +1,28 @@
-import json
 import os
+from openai import AsyncOpenAI
+from src.email_classification.pinecone_singleton_service import PineconeSingleton
+from .email_classification_model import EmailClassification
+from nest.core import Injectable
+import json
 import logging
-import re
-import torch
-import numpy as np
-from typing import List, Tuple, Optional,Dict
-from langchain.embeddings.base import Embeddings
-from transformers import AutoTokenizer, AutoModel
-import html2text
-from bge_singleton import BGEEmbeddings
-from domain_anaylyzer import EmailDomainAnalyzer
-from mongodb import mongodb
-from email_parser import EmailContentProcessor
-from prompts import business_context
-# from email_processor import BGEEmbeddings
-logger = logging.getLogger(__name__)
+from .bge_singleton_service import BGESingleton
+from utils.domain_anaylyzer import EmailDomainAnalyzer
+from src.database.mongodb import MongoDB
+from utils.email_parser import EmailContentProcessor
+from utils.prompts.question_context import question_context
+from utils.prompts.business_context import business_context
+from utils.prompts.sales_stages import sales_stages
+from prisma import Prisma
 
-class ManualEmailClassifier:
-    def __init__(self, prisma_client, pinecone_index, openai_client):
-        self.prisma = prisma_client
-        self.pinecone_index = pinecone_index
-        self.openai = openai_client
-        self.embeddings = BGEEmbeddings()
+logger = logging.getLogger(__name__)
+@Injectable
+class EmailClassificationService:
+    def __init__(self,mongodb:MongoDB):
+        self.mongodb = mongodb
+        self.prisma = Prisma()
+        self.pinecone_index = PineconeSingleton().get_index()
+        self.openai = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.embeddings = BGESingleton()
         self.categories = [
             "PROSPECT", "LEAD_GENERATION", "OPPORTUNITY",
             "FULFILLMENT", "DEAL", "SALE","OTHERS"
@@ -62,12 +63,12 @@ class ManualEmailClassifier:
                     "total_processed": 1,
                     "next_skip": skip + batch_size
                 }
-                result_id = await mongodb.save_classification_result(mongo_result)
+                result_id = await self.mongodb.save_classification_result(mongo_result)
             except Exception as mongo_error:
                 logger.error(f"MongoDB save error for email {email.id}: {str(mongo_error)}")
         
         # Update email category
-        await self._update_email_category(email.id, category)
+        # await self._update_email_category(email.id, category)
         
         return special_result, result_id
     
@@ -131,133 +132,133 @@ class ManualEmailClassifier:
                     if result_id:
                         saved_ids.append(result_id)
                     continue
-                    logger.warning(f"Email body empty after cleaning for email ID: {email.id}")
-                    empty_result = {
-                        "email_details": {
-                            "id": email.id,
-                            "subject": email.subject,
-                            "sender": email.sender_email,
-                            "recipients": email.recipients,
-                            "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
-                            "body": "EMPTY AFTER CLEANING"
-                        },
-                        "classification_process": {
-                            "final_result": {
-                                "category": "OTHERS",
-                                "confidence": 0.95,
-                                "rationale": "Email has no meaningful content after cleaning"
-                            }
-                        },
-                        "status": "success"
-                    }
-                    classification_results.append(empty_result)
-                    
-                    if save_immediately:
-                        mongo_result = {
-                            "status": "success",
-                            "results": [empty_result],
-                            "total_processed": 1,
-                            "next_skip": skip + batch_size
-                        }
-                        result_id = await mongodb.save_classification_result(mongo_result)
-                        saved_ids.append(result_id)
-                    
-                    await self._update_email_category(email.id, "OTHERS")
-                    continue
-                
-                # Step 2: Initial classification with domain analysis
-                domain_analyzer = EmailDomainAnalyzer() 
-                domain_analysis = domain_analyzer.analyze_email_addresses(
-                    email.sender_email,
-                    email.recipients
-                )
-                
-                # Log the final cleaned text and domain analysis
-                logger.info(f"Cleaned email body: {text_body[:200]}...")
-                logger.info(f"Domain analysis result: {domain_analysis}")
-                
-                initial_result = await self._initial_classification(email, domain_analysis, text_body)
-                
-                if 'uncertainty_points' in initial_result:
-                    uncertainties = initial_result['uncertainty_points']
-                elif 'final_result' in initial_result and 'uncertainty_points' in initial_result['final_result']:
-                    uncertainties = initial_result['final_result']['uncertainty_points']
-                else:
-                    uncertainties = []
-
-                # Step 3: Retrieve related context
-                retrieved_context = await self._retrieve_related_context(
-                    text_body,
-                    email.subject,
-                    email.sender_email,
-                    email.recipients,
-                    uncertainties
-                )
-                logger.info(f"Retrieved context: {retrieved_context}")
-                
-                # Step 4: Final classification with context
-                final_result = await self._final_classification(
-                    text_body, 
-                    retrieved_context,
-                    initial_result,
-                    domain_analysis
-                )
-                logger.info(f"Final classification result: {final_result}")
-
-                similar_emails = []
-                for line in retrieved_context.split('\n'):
-                    if line.startswith('Similar email'):
-                        parts = line.split(' | ')
-                        email_data = {}
-                        for part in parts:
-                            if ': ' in part:
-                                key, value = part.split(': ', 1)
-                                email_data[key.strip()] = value.strip()
-                        if email_data:
-                            similar_emails.append(email_data)
-
-                email_result = {
+                logger.warning(f"Email body empty after cleaning for email ID: {email.id}")
+                empty_result = {
                     "email_details": {
                         "id": email.id,
                         "subject": email.subject,
                         "sender": email.sender_email,
                         "recipients": email.recipients,
                         "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
-                        "body": text_body
+                        "body": "EMPTY AFTER CLEANING"
                     },
-                    "domain_analysis": domain_analysis,
-                    "initial_classification": initial_result,
-                    "similar_emails": similar_emails,
                     "classification_process": {
-                        "iterations": final_result["iterations"],
-                        "total_iterations": final_result["total_iterations"],
-                        "final_result": final_result["final_result"]
+                        "final_result": {
+                            "category": "OTHERS",
+                            "confidence": 0.95,
+                            "rationale": "Email has no meaningful content after cleaning"
+                        }
                     },
                     "status": "success"
                 }
+                classification_results.append(empty_result)
                 
-                # Save each email's result individually if requested
                 if save_immediately:
-                    try:
-                        # Prepare single result for MongoDB
-                        mongo_result = {
-                            "status": "success",
-                            "results": [email_result],
-                            "total_processed": 1,
-                            "next_skip": skip + batch_size  # This will be the same for all emails in batch
-                        }
-                        
-                        # Save to MongoDB
-                        result_id = await mongodb.save_classification_result(mongo_result)
-                        saved_ids.append(result_id)
-                        logger.info(f"Saved result for email {email.id} to MongoDB: {result_id}")
-                    except Exception as mongo_error:
-                        logger.error(f"MongoDB save error for email {email.id}: {str(mongo_error)}")
+                    mongo_result = {
+                        "status": "success",
+                        "results": [empty_result],
+                        "total_processed": 1,
+                        "next_skip": skip + batch_size
+                    }
+                    result_id = await self.mongodb.save_classification_result(mongo_result)
+                    saved_ids.append(result_id)
                 
-                classification_results.append(email_result)
+                await self._update_email_category(email.id, "OTHERS")
+                continue
                 
-                # Step 5: Update with final category
-                await self._update_email_category(email.id, final_result["final_result"]["category"])
+            # Step 2: Initial classification with domain analysis
+            domain_analyzer = EmailDomainAnalyzer() 
+            domain_analysis = domain_analyzer.analyze_email_addresses(
+                email.sender_email,
+                email.recipients
+            )
+            
+            # Log the final cleaned text and domain analysis
+            logger.info(f"Cleaned email body: {text_body[:200]}...")
+            logger.info(f"Domain analysis result: {domain_analysis}")
+            
+            initial_result = await self._initial_classification(email, domain_analysis, text_body)
+            
+            if 'uncertainty_points' in initial_result:
+                uncertainties = initial_result['uncertainty_points']
+            elif 'final_result' in initial_result and 'uncertainty_points' in initial_result['final_result']:
+                uncertainties = initial_result['final_result']['uncertainty_points']
+            else:
+                uncertainties = []
+
+            # Step 3: Retrieve related context
+            retrieved_context = await self._retrieve_related_context(
+                text_body,
+                email.subject,
+                email.sender_email,
+                email.recipients,
+                uncertainties
+            )
+            logger.info(f"Retrieved context: {retrieved_context}")
+            
+            # Step 4: Final classification with context
+            final_result = await self._final_classification(
+                text_body, 
+                retrieved_context,
+                initial_result,
+                domain_analysis
+            )
+            logger.info(f"Final classification result: {final_result}")
+
+            similar_emails = []
+            for line in retrieved_context.split('\n'):
+                if line.startswith('Similar email'):
+                    parts = line.split(' | ')
+                    email_data = {}
+                    for part in parts:
+                        if ': ' in part:
+                            key, value = part.split(': ', 1)
+                            email_data[key.strip()] = value.strip()
+                    if email_data:
+                        similar_emails.append(email_data)
+
+            email_result = {
+                "email_details": {
+                    "id": email.id,
+                    "subject": email.subject,
+                    "sender": email.sender_email,
+                    "recipients": email.recipients,
+                    "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
+                    "body": text_body
+                },
+                "domain_analysis": domain_analysis,
+                "initial_classification": initial_result,
+                "similar_emails": similar_emails,
+                "classification_process": {
+                    "iterations": final_result["iterations"],
+                    "total_iterations": final_result["total_iterations"],
+                    "final_result": final_result["final_result"]
+                },
+                "status": "success"
+            }
+            
+            # Save each email's result individually if requested
+            if save_immediately:
+                try:
+                    # Prepare single result for MongoDB
+                    mongo_result = {
+                        "status": "success",
+                        "results": [email_result],
+                        "total_processed": 1,
+                        "next_skip": skip + batch_size  # This will be the same for all emails in batch
+                    }
+                    
+                    # Save to MongoDB
+                    result_id = await self.mongodb.save_classification_result(mongo_result)
+                    saved_ids.append(result_id)
+                    logger.info(f"Saved result for email {email.id} to MongoDB: {result_id}")
+                except Exception as mongo_error:
+                    logger.error(f"MongoDB save error for email {email.id}: {str(mongo_error)}")
+            
+            classification_results.append(email_result)
+            
+            # Step 5: Update with final category
+            await self._update_email_category(email.id, final_result["final_result"]["category"])
         
             if save_immediately:
                 return {
@@ -463,86 +464,7 @@ class ManualEmailClassifier:
     async def _final_classification(self, email_body: str, context: str, initial_result: dict, domain_analysis) -> dict:
         """Make final classification with retrieved context"""
 
-        if domain_analysis.get('is_self_addressed', False):
-            # Wrap the result in the expected structure with iterations
-            return {
-                "final_result": {
-                    "category": "OTHERS", 
-                    "confidence": 0.95,
-                    "uncertainty_points": [],
-                    "rationale": "Self-addressed email (likely template, draft, or test)"
-                },
-                "iterations": [{
-                    "iteration": 0,
-                    "classification": {
-                        "category": "OTHERS", 
-                        "confidence": 0.95,
-                        "uncertainty_points": [],
-                        "rationale": "Self-addressed email (likely template, draft, or test)"
-                    },
-                    "questions": None,
-                    "additional_context": None
-                }],
-                "total_iterations": 0
-            }
-            
-        # NEW: Check for non-business domains
-        if domain_analysis.get('is_likely_non_business', False):
-            return {
-                "final_result": {
-                    "category": "OTHERS", 
-                    "confidence": 0.98,
-                    "uncertainty_points": [],
-                    "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
-                },
-                "iterations": [{
-                    "iteration": 0,
-                    "classification": {
-                        "category": "OTHERS", 
-                        "confidence": 0.98,
-                        "uncertainty_points": [],
-                        "rationale": f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
-                    },
-                    "questions": None,
-                    "additional_context": None
-                }],
-                "total_iterations": 0
-            }
-    
-        # Then check if this is likely a vendor email
-        if domain_analysis['is_likely_vendor_email']:
-            # Wrap the result in the expected structure with iterations
-            return {
-                "final_result": {
-                    "category": "OTHERS",
-                    "confidence": 0.9,
-                    "uncertainty_points": [],
-                    "rationale": "Email identified as vendor communication (invoice/billing/subscription)"
-                },
-                "iterations": [{
-                    "iteration": 0,
-                    "classification": {
-                        "category": "OTHERS",
-                        "confidence": 0.9,
-                        "uncertainty_points": [],
-                        "rationale": "Email identified as vendor communication (invoice/billing/subscription)"
-                    },
-                    "questions": None,
-                    "additional_context": None
-                }],
-                "total_iterations": 0
-            }
-            
-        # NEW: Special handling for internal communication using personal emails
-        internal_comm_note = ""
-        if domain_analysis.get('is_internal_communication', False) and domain_analysis.get('sender_is_company_employee_personal_email', False):
-            internal_comm_note = """
-            IMPORTANT: This appears to be internal communication between company employees where at least one person is using a personal email address. 
-            Consider the content carefully to determine if this is:
-            1. A test/template email (category=OTHERS)
-            2. An actual business communication (category based on content)
-            """
-            
+
         base_prompt = f"""You are an expert email classifier for ProficientNow's recruitment pipeline. 
         Your task is to analyze this email and determine its category with high confidence.
 
@@ -564,8 +486,7 @@ class ManualEmailClassifier:
             - Sharing actual resumes/profiles
             - Discussing interview feedback for specific candidates
             - Coordinating interviews for specific candidates
-            
-        IMPORTANT: Check email direction carefully!
+         IMPORTANT: Check email direction carefully!
         - If from a generic email (gmail, etc.) TO company, and asking about job details = FULFILLMENT
         - Brief messages like "Can you tell me more about this role?" or "What are the benefits?" from a candidate = FULFILLMENT
 
@@ -590,149 +511,7 @@ class ManualEmailClassifier:
 
         Stage Definitions with STRICT Criteria:
 
-        1. PROSPECT
-        MUST HAVE:
-        - Internal research about potential client companies
-        - No direct client contact
-        - Discussion of market research or company analysis
-        MUST NOT HAVE:
-        - Direct communication with clients/candidates
-        - Job descriptions or requirements
-
-        2. LEAD_GENERATION
-        TARGET AUDIENCE: CLIENT COMPANIES (not candidates)
-        DIRECTION: Company → Client Company
-        PURPOSE: Marketing services, offering to fill positions
-        MUST HAVE at least ONE:
-        - Offering to provide candidates to client companies
-        - "Have candidates" or "qualified candidates" for client positions
-        - Phrases like "would you like to review resumes" to clients
-        - Follow-up about staffing services with clients
-        - Outreach about having matches for client positions
-        MUST NOT HAVE:
-        - Direct candidate communication about applying to jobs
-        - Sharing job descriptions with candidates
-        - Interview scheduling with candidates
-        KEY INDICATORS:
-        - Content: Offering to share candidates/resumes with clients
-        - Pattern: Recruiter to client company communication
-        - Intent: Marketing available candidates to clients
-        EXAMPLES:
-        - "I have candidates for your position"
-        - "Would you like to review the resumes"
-        - "We have qualified matches for your role"
-
-        3. OPPORTUNITY
-        TARGET AUDIENCE: CLIENT COMPANIES
-        DIRECTION: Company ↔ Client Company
-        PURPOSE: Gathering requirements, initial business discussions
-        MUST HAVE:
-        - Detailed requirement gathering from client
-        - Business Development Manager involvement
-        - Specific position requirements from client
-        - Early discussions about potential business relationships
-        - Initial negotiations about terms BEFORE a contract is drafted
-        - Conversations about warranty periods and fee structures
-        - Discussions that indicate interest but no firm commitment yet
-        MUST NOT HAVE:
-        - Candidate communication
-        EXAMPLES:
-        - "Please share your detailed requirements"
-        - "Our BDM will contact you"
-
-        4. FULFILLMENT
-        TARGET AUDIENCE: CANDIDATES AND CLIENTS (regarding specific candidates)
-        DIRECTION: 
-        - Candidate ↔ Company (about jobs)
-        - Company ↔ Client (about specific candidates)
-        PURPOSE: Recruiting, interviewing, screening, profile sharing
-        MUST HAVE AT LEAST ONE:
-        - Direct candidate engagement with job details
-        - Candidate inquiring about job specifics (even brief questions)
-        - Sharing candidate profiles/resumes with clients
-        - Interview coordination (schedules, feedback)
-        - Candidate screening discussions
-        - Client feedback on specific candidates
-        COMMON CONTENT:
-        - Job titles, compensation, and location details
-        - Questions about job benefits, location, or type of work
-        - Interview requests or feedback
-        - Screening conversations
-        - Candidate rejections or expressions of no interest
-        - Discussion of candidate qualifications
-        - "Here is the resume of [candidate name]"
-        - Specific feedback about a candidate
-        - Interview scheduling with clients
-        MUST NOT HAVE:
-        - Marketing general services (not specific candidates)
-        - Initial service offering communications
-        - Business development discussions without specific candidates
-        - Contract discussions or payment terms
-        EXAMPLES:
-        - "I'd like to discuss this job opportunity with you"
-        - "Here is the job description for the position we discussed"
-        - "I'm not interested in this position" (from candidate)
-        - "Can we schedule an interview?"
-        - "Is this a remote position?" (from candidate)
-        - "What benefits are offered?" (from candidate)
-        - "Please find attached the resume for John Smith for your review"
-        - "The candidate has 5 years of experience in Java development"
-        - "Your feedback on the candidate we sent yesterday"
-
-        5. DEAL
-        TARGET AUDIENCE: CLIENT COMPANIES
-        DIRECTION: Company ↔ Client Company
-        PURPOSE: Finalizing agreements, contracts, terms
-        MUST HAVE:
-        - Final Contract discussions
-        - Payment terms
-        - Service agreements
-        - Formal contract drafts being exchanged
-        - Final negotiations on legal terms with intent to sign
-        - Clear indication both parties have committed to work together
-        - Specific contract language being discussed
-        MUST NOT HAVE:
-        - Job descriptions
-        - Candidate communication
-        EXAMPLES:
-        - "Please review the final contract terms"
-        - "Here are our payment milestones"
-
-        6. SALE
-        TARGET AUDIENCE: CLIENT COMPANIES
-        DIRECTION: Company → Client Company
-        PURPOSE: Confirming placements, invoicing, post-placement activities
-        MUST HAVE at least ONE:
-        - Confirmed candidate placements
-        - Offer letters issued and accepted
-        - Candidate joining confirmations
-        - Invoice generation TO CLIENTS
-        - Payment collection FROM CLIENTS
-        - Post-placement follow-up
-        MUST NOT HAVE:
-        - Contract negotiations
-        - Early stage discussions
-        KEY INDICATORS:
-        - Content: Placement confirmations, invoices to clients
-        - Pattern: Post-deal operational communications
-        - Intent: Managing active placements, collecting revenue
-        EXAMPLES:
-        - "The candidate has accepted and will join on March 1st"
-        - "Please find attached the invoice for the placement"
-        - "We've confirmed the start date for the candidate"
-        - "Following up on our placed candidate's performance"
-
-        7. OTHERS
-        This includes:
-        - Vendor invoices TO our company
-        - Subscription notices FROM external services
-        - Administrative emails unrelated to recruitment
-        - Auto-generated notifications
-        - Internal operations unrelated to specific deals
-        EXAMPLES:
-        - "Your subscription payment is due"
-        - "Invoice from [Vendor] to ProficientNow"
-        - "Office closure notification"
+        {sales_stages}
 
         IMPORTANT DECISION TREE FOR CLASSIFICATION:
         1. Is the email internal communication about potential clients? → PROSPECT
@@ -782,31 +561,7 @@ class ManualEmailClassifier:
 
             Consider these key aspects for each stage:
 
-            LEAD_GENERATION:
-            - Direction: Company to client communication
-            - Purpose: Marketing candidates/services 
-            - Content pattern: Offering resources/candidates-
-            - It could look like FULFILLMENT, but it can be a marketing gimic. 
-
-            FULFILLMENT:
-            - Direction: Company to candidate communication
-            - Purpose: Recruitment activities
-            - Content pattern: Job details, screening
-
-            OPPORTUNITY:
-            - Direction: Client requirement gathering
-            - Purpose: Understanding needs
-            - Content pattern: Specifications, planning
-
-            DEAL:
-            - Direction: Contract discussions
-            - Purpose: Agreement finalization
-            - Content pattern: Terms, conditions
-
-            SALE:
-            - Direction: Placement completion
-            - Purpose: Onboarding, payment
-            - Content pattern: Offers, joining
+            {question_context}
 
             Generate questions that would help clarify the true stage of this email.
             Focus on the email's:
@@ -918,21 +673,12 @@ class ManualEmailClassifier:
         "total_iterations": current_iteration + 1
         }
     
-    def _get_pipeline_descriptions(self) -> str:
-        """Return formatted pipeline stages"""
-        return """
-        1. PROSPECT: Researching potential clients
-        2. LEAD_GENERATION: Initial outreach and follow-ups
-        3. OPPORTUNITY: Client requirements gathering
-        4. FULFILLMENT: Candidate sourcing and interviews
-        5. DEAL: Contract negotiations
-        6. SALE: Successful placements and payments
-        """.strip()
 
     async def _get_unprocessed_emails(self, batch_size: int, skip: int):
         """Retrieve unprocessed emails from database"""
         try:
             # No need to connect/disconnect here since it's managed in the task
+            await self.prisma.connect()
             return await self.prisma.messages.find_many(
                 skip=skip,
                 take=batch_size,
@@ -941,12 +687,3 @@ class ManualEmailClassifier:
         except Exception as e:
             logger.error(f"Error fetching messages: {str(e)}")
             raise
-
-    async def _update_email_category(self, email_id: str, category: str):
-        """Update database with classification result"""
-        # await self.prisma.email.update(
-        #     where={"id": email_id},
-        #     data={"category": category}
-        # )
-        print(f"category is {category}")
-        

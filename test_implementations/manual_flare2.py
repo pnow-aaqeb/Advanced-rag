@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional,Dict
 from langchain.embeddings.base import Embeddings
 from transformers import AutoTokenizer, AutoModel
 import html2text
-from bge_singleton import BGEEmbeddings
+from utils.bge_singleton import BGEEmbeddings
 
 # from email_processor import BGEEmbeddings
 logger = logging.getLogger(__name__)
