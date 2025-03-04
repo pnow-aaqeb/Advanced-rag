@@ -178,6 +178,15 @@ class EmailContentProcessor:
         
     @staticmethod
     def is_empty_or_minimal_content(email_body: str) -> bool:
+        """
+        Checks if an email has empty or minimal content (like just a signature).
+        
+        Args:
+            email_body: The email body text
+            
+        Returns:
+            Boolean indicating if the email has substantive content
+        """
         if not email_body or email_body.isspace():
             return True
             

@@ -1,7 +1,6 @@
 import os
 from openai import AsyncOpenAI
 from src.email_classification.pinecone_singleton_service import PineconeSingleton
-from .email_classification_model import EmailClassification
 from nest.core import Injectable
 import json
 import logging
