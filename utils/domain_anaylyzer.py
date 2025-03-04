@@ -18,10 +18,11 @@ class EmailDomainAnalyzer:
         
         self.non_business_company_domains = {
             'proficientnowbooks.com',  
-            'proficientnowtech.com',   
+            'proficientnowtech.com',  
         }
 
         self.vendor_domains = {
+            'kekamail.com',
             'zohocorp.com',
             'microsoft.com',
             'adobe.com',

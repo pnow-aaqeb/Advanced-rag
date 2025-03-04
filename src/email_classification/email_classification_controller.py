@@ -14,7 +14,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 @Controller()
-@Injectable()
+# @Injectable()
 class EmailClassificationController:
     def __init__(self, manual_email_classifier: EmailClassificationService,mongodb:MongoDB):
         self.classifier = manual_email_classifier
@@ -43,8 +43,8 @@ class EmailClassificationController:
                 detail=f"Failed to start processing: {str(e)}"
             )
 
-    @Get('/task-status/:task_id')
-    async def get_task_status(self, task_id: str = Param(None)):
+    @Get('/task-status/{task_id}')
+    async def get_task_status(self, task_id):
         """
         Check the status of an async task
         """

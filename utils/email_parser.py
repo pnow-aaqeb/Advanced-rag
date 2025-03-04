@@ -101,7 +101,6 @@ class EmailContentProcessor:
             except Exception as e:
                 logger.error(f"Error cleaning text: {str(e)}")
                 clean_text = text_content  # Fallback to original
-                
             return clean_text.strip(), metadata
             
         # If delimiters are found, extract the content before the first one
@@ -136,7 +135,7 @@ class EmailContentProcessor:
         except Exception as e:
             logger.error(f"Error processing email content: {str(e)}")
             current_email = text_content[:1000] if len(text_content) > 1000 else text_content  # Fallback
-                
+        logger.info(msg=f"The is the clean current email:{current_email} and metadata:{metadata}")       
         return current_email, metadata
     
     @staticmethod
@@ -179,15 +178,6 @@ class EmailContentProcessor:
         
     @staticmethod
     def is_empty_or_minimal_content(email_body: str) -> bool:
-        """
-        Checks if an email has empty or minimal content (like just a signature).
-        
-        Args:
-            email_body: The email body text
-            
-        Returns:
-            Boolean indicating if the email has substantive content
-        """
         if not email_body or email_body.isspace():
             return True
             
@@ -202,15 +192,26 @@ class EmailContentProcessor:
                 r'Thank you,.*$',
                 r'Best,.*$',
             ]
-            
             for pattern in signature_patterns:
                 stripped_body = re.sub(pattern, '', stripped_body, flags=re.DOTALL)
                 
-            # Count meaningful words (longer than 2 characters)
-            meaningful_words = [word for word in re.findall(r'\b\w+\b', stripped_body) if len(word) > 2]
+            # Log the stripped content for debugging
+            logger.debug(f"Stripped body for analysis: {stripped_body[:100]}...")
+                
+            # More reliable word counting for structured emails
+            words = re.findall(r'[A-Za-z0-9]+', stripped_body)
             
-            # If we have fewer than 5 meaningful words, it's minimal content
-            return len(meaningful_words) < 5
+            # Count all words, not just "meaningful" ones
+            total_words = len(words)
+            
+            # Count meaningful words (longer than 2 characters) as a backup check
+            meaningful_words = [word for word in words if len(word) > 2]
+            
+            # Log the counts for debugging
+            logger.debug(f"Total words: {total_words}, Meaningful words: {len(meaningful_words)}")
+            
+            # Consider email empty if both counts are very low
+            return total_words < 10 and len(meaningful_words) < 3
         except Exception as e:
             logger.error(f"Error checking if content is empty: {str(e)}")
             return True  # Assume empty on error

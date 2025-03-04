@@ -83,183 +83,105 @@ class EmailClassificationService:
             saved_ids = []
             
             for email in emails:
-                # Step 1: Process domain first to check for non-business domains
+                # Process domain analysis
                 domain_analyzer = EmailDomainAnalyzer()
                 domain_analysis = domain_analyzer.analyze_email_addresses(
                     email.sender_email,
                     email.recipients
                 )
                 
-                # Case 1: Non-business domain
-                if domain_analysis.get('is_likely_non_business', False):
-                    logger.info(f"Email using non-business domain detected: {domain_analysis['sender_domain']}")
-                    result, result_id = await self._create_special_case_email_result(
-                        email, domain_analysis, "OTHERS", 0.98,
-                        f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes",
-                        "NON-BUSINESS DOMAIN", skip, batch_size
-                    )
-                    classification_results.append(result)
-                    if result_id:
-                        saved_ids.append(result_id)
-                    continue
-                
-                # Case 2: Empty email body
-                if not email.body or email.body.isspace():
-                    logger.warning(f"Empty email body detected for email ID: {email.id}")
-                    result, result_id = await self._create_special_case_email_result(
-                        email, domain_analysis, "OTHERS", 0.95,
-                        "Email has empty body content",
-                        "EMPTY", skip, batch_size
-                    )
-                    classification_results.append(result)
-                    if result_id:
-                        saved_ids.append(result_id)
-                    continue
-                
                 # Process and clean email body
                 email_processor = EmailContentProcessor()
                 text_body, metadata = email_processor.extract_current_email(email.body)
                 
-                # Case 3: Empty after cleaning
-                if not text_body.strip():
-                    logger.warning(f"Email body empty after cleaning for email ID: {email.id}")
-                    result, result_id = await self._create_special_case_email_result(
-                        email, domain_analysis, "OTHERS", 0.95,
-                        "Email has no meaningful content after cleaning",
-                        "EMPTY AFTER CLEANING", skip, batch_size
-                    )
-                    classification_results.append(result)
-                    if result_id:
-                        saved_ids.append(result_id)
-                    continue
-                logger.warning(f"Email body empty after cleaning for email ID: {email.id}")
-                empty_result = {
+                # Log the final cleaned text and domain analysis
+                logger.info(f"Cleaned email body: {text_body[:200]}...")
+                logger.info(f"Domain analysis result: {domain_analysis}")
+                
+                # Step 2: Initial classification with domain analysis
+                initial_result = await self._initial_classification(email, domain_analysis, text_body)
+                
+                if 'uncertainty_points' in initial_result:
+                    uncertainties = initial_result['uncertainty_points']
+                elif 'final_result' in initial_result and 'uncertainty_points' in initial_result['final_result']:
+                    uncertainties = initial_result['final_result']['uncertainty_points']
+                else:
+                    uncertainties = []
+
+                # Step 3: Retrieve related context
+                retrieved_context = await self.retrieve_related_context(
+                    text_body,
+                    email.subject,
+                    email.sender_email,
+                    email.recipients,
+                    uncertainties
+                )
+                logger.info(f"Retrieved context: {retrieved_context}")
+                
+                # Step 4: Final classification with context
+                final_result = await self._final_classification(
+                    text_body, 
+                    retrieved_context,
+                    initial_result,
+                    domain_analysis
+                )
+                logger.info(f"Final classification result: {final_result}")
+
+                similar_emails = []
+                for line in retrieved_context.split('\n'):
+                    if line.startswith('Similar email'):
+                        parts = line.split(' | ')
+                        email_data = {}
+                        for part in parts:
+                            if ': ' in part:
+                                key, value = part.split(': ', 1)
+                                email_data[key.strip()] = value.strip()
+                        if email_data:
+                            similar_emails.append(email_data)
+
+                email_result = {
                     "email_details": {
                         "id": email.id,
                         "subject": email.subject,
                         "sender": email.sender_email,
                         "recipients": email.recipients,
                         "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
-                        "body": "EMPTY AFTER CLEANING"
+                        "body": text_body
                     },
+                    "domain_analysis": domain_analysis,
+                    "initial_classification": initial_result,
+                    "similar_emails": similar_emails,
                     "classification_process": {
-                        "final_result": {
-                            "category": "OTHERS",
-                            "confidence": 0.95,
-                            "rationale": "Email has no meaningful content after cleaning"
-                        }
+                        "iterations": final_result["iterations"],
+                        "total_iterations": final_result["total_iterations"],
+                        "final_result": final_result["final_result"]
                     },
                     "status": "success"
                 }
-                classification_results.append(empty_result)
                 
+                # Save each email's result individually if requested
                 if save_immediately:
-                    mongo_result = {
-                        "status": "success",
-                        "results": [empty_result],
-                        "total_processed": 1,
-                        "next_skip": skip + batch_size
-                    }
-                    result_id = await self.mongodb.save_classification_result(mongo_result)
-                    saved_ids.append(result_id)
+                    try:
+                        # Prepare single result for MongoDB
+                        mongo_result = {
+                            "status": "success",
+                            "results": [email_result],
+                            "total_processed": 1,
+                            "next_skip": skip + batch_size  # This will be the same for all emails in batch
+                        }
+                        
+                        # Save to MongoDB
+                        result_id = await self.mongodb.save_classification_result(mongo_result)
+                        saved_ids.append(result_id)
+                        logger.info(f"Saved result for email {email.id} to MongoDB: {result_id}")
+                    except Exception as mongo_error:
+                        logger.error(f"MongoDB save error for email {email.id}: {str(mongo_error)}")
                 
-                await self._update_email_category(email.id, "OTHERS")
-                continue
+                classification_results.append(email_result)
                 
-            # Step 2: Initial classification with domain analysis
-            domain_analyzer = EmailDomainAnalyzer() 
-            domain_analysis = domain_analyzer.analyze_email_addresses(
-                email.sender_email,
-                email.recipients
-            )
+                # Step 5: Update with final category
+                # await self._update_email_category(email.id, final_result["final_result"]["category"])
             
-            # Log the final cleaned text and domain analysis
-            logger.info(f"Cleaned email body: {text_body[:200]}...")
-            logger.info(f"Domain analysis result: {domain_analysis}")
-            
-            initial_result = await self._initial_classification(email, domain_analysis, text_body)
-            
-            if 'uncertainty_points' in initial_result:
-                uncertainties = initial_result['uncertainty_points']
-            elif 'final_result' in initial_result and 'uncertainty_points' in initial_result['final_result']:
-                uncertainties = initial_result['final_result']['uncertainty_points']
-            else:
-                uncertainties = []
-
-            # Step 3: Retrieve related context
-            retrieved_context = await self._retrieve_related_context(
-                text_body,
-                email.subject,
-                email.sender_email,
-                email.recipients,
-                uncertainties
-            )
-            logger.info(f"Retrieved context: {retrieved_context}")
-            
-            # Step 4: Final classification with context
-            final_result = await self._final_classification(
-                text_body, 
-                retrieved_context,
-                initial_result,
-                domain_analysis
-            )
-            logger.info(f"Final classification result: {final_result}")
-
-            similar_emails = []
-            for line in retrieved_context.split('\n'):
-                if line.startswith('Similar email'):
-                    parts = line.split(' | ')
-                    email_data = {}
-                    for part in parts:
-                        if ': ' in part:
-                            key, value = part.split(': ', 1)
-                            email_data[key.strip()] = value.strip()
-                    if email_data:
-                        similar_emails.append(email_data)
-
-            email_result = {
-                "email_details": {
-                    "id": email.id,
-                    "subject": email.subject,
-                    "sender": email.sender_email,
-                    "recipients": email.recipients,
-                    "sent_date": email.sent_date_time.isoformat() if hasattr(email, 'sent_date_time') else None,
-                    "body": text_body
-                },
-                "domain_analysis": domain_analysis,
-                "initial_classification": initial_result,
-                "similar_emails": similar_emails,
-                "classification_process": {
-                    "iterations": final_result["iterations"],
-                    "total_iterations": final_result["total_iterations"],
-                    "final_result": final_result["final_result"]
-                },
-                "status": "success"
-            }
-            
-            # Save each email's result individually if requested
-            if save_immediately:
-                try:
-                    # Prepare single result for MongoDB
-                    mongo_result = {
-                        "status": "success",
-                        "results": [email_result],
-                        "total_processed": 1,
-                        "next_skip": skip + batch_size  # This will be the same for all emails in batch
-                    }
-                    
-                    # Save to MongoDB
-                    result_id = await self.mongodb.save_classification_result(mongo_result)
-                    saved_ids.append(result_id)
-                    logger.info(f"Saved result for email {email.id} to MongoDB: {result_id}")
-                except Exception as mongo_error:
-                    logger.error(f"MongoDB save error for email {email.id}: {str(mongo_error)}")
-            
-            classification_results.append(email_result)
-            
-            # Step 5: Update with final category
-            await self._update_email_category(email.id, final_result["final_result"]["category"])
-        
             if save_immediately:
                 return {
                     "status": "success",
@@ -273,7 +195,7 @@ class EmailClassificationService:
                     "results": classification_results,
                     "total_processed": len(classification_results)
                 }
-                
+                    
                     
         except Exception as e:
             logger.error(f"Error during email classification: {str(e)}")
@@ -305,25 +227,70 @@ class EmailClassificationService:
     async def _initial_classification(self, email, domain_analysis, text_body) -> dict:
         """Get initial classification with uncertainty detection"""
         
+            # Case 1: Self-addressed email
         if domain_analysis.get('is_self_addressed', False):
-            return self.create_special_case_result(
-                "OTHERS", 0.95, 
-                "Self-addressed email (likely template, draft, or test)"
-            )
+            reasoning = "Self-addressed email (likely template, draft, or test). The sender and recipients are from the same domain, suggesting internal communication or automated message."
+            confidence = max(0.95, self.confidence_threshold)
+            return {
+                "category": "OTHERS",
+                "confidence": confidence,
+                "uncertainty_points": [],
+                "rationale": reasoning
+            }
             
-        #  Check for non-business domains
+        # Case 2: Non-business domain
         if domain_analysis.get('is_likely_non_business', False):
-            return self.create_special_case_result(
-                "OTHERS", 0.98,
-                f"Email uses non-business company domain ({domain_analysis['sender_domain']}) which is used for other purposes"
-            )
-    
-        # Then check if this is likely a vendor email
+            domain = domain_analysis['sender_domain']
+            reasoning = f"Email uses non-business company domain ({domain}) which is typically used for personal or non-commercial purposes. This suggests the email is not directly related to business operations."
+            logger.info(f"Email using non-business domain detected: {domain}")
+            confidence = max(0.98, self.confidence_threshold)
+            return {
+                "category": "OTHERS",
+                "confidence": confidence,
+                "uncertainty_points": [],
+                "rationale": reasoning
+            }
+        
+        # Case 3: Vendor email
         if domain_analysis.get('is_likely_vendor_email', False):
-            return self.create_special_case_result(
-                "OTHERS", 0.9,
-                "Email identified as vendor communication (invoice/billing/subscription)"
-            )
+            domain = domain_analysis['sender_domain']
+            vendor_indicators = ", ".join(domain_analysis.get('reasoning', []))
+            reasoning = f"Email identified as vendor communication (invoice/billing/subscription) from domain {domain}. Indicators: {vendor_indicators}. Vendor communications are classified as OTHERS as they are not directly related to sales pipeline."
+            logger.info(f"Email from vendor domain detected: {domain}")
+            confidence = max(0.9, self.confidence_threshold)
+            return {
+                "category": "OTHERS",
+                "confidence": confidence,
+                "uncertainty_points": [],
+                "rationale": reasoning
+            }
+        
+        # Case 4: Empty email body
+        if not email.body or email.body.isspace():
+            reasoning = f"Email has empty body content. Subject: '{email.subject}'. Empty emails cannot be classified based on content and are automatically assigned to OTHERS category."
+            logger.warning(f"Empty email body detected for email ID: {email.id}")
+            confidence = max(0.95, self.confidence_threshold)
+            return {
+                "category": "OTHERS",
+                "confidence": confidence,
+                "uncertainty_points": [],
+                "rationale": reasoning
+            }
+        
+        # Case 5: Check for content after cleaning
+        email_processor = EmailContentProcessor()
+        text_body, metadata = email_processor.extract_current_email(email.body)
+        
+        if not text_body.strip():
+            reasoning = f"Email body contains no meaningful content after cleaning. Original length: {len(email.body)}, cleaned length: 0. This suggests the email contains only formatting, signatures, or non-textual content, and cannot be classified based on text content."
+            logger.warning(f"Email body empty after cleaning for email ID: {email.id}")
+            confidence = max(0.95, self.confidence_threshold)
+            return {
+                "category": "OTHERS",
+                "confidence": confidence,
+                "uncertainty_points": [],
+                "rationale": reasoning
+            }
             
         #  Check for internal communication using personal emails
         if domain_analysis.get('is_internal_communication', False) and domain_analysis.get('sender_is_company_employee_personal_email', False):
@@ -390,10 +357,22 @@ class EmailClassificationService:
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
-        logger.info(msg=f"response from intial classification:{response}")
+        logger.info(msg=f"response from initial classification:{response}")
         
-        return json.loads(response.choices[0].message.content)
-
+        result = json.loads(response.choices[0].message.content)
+        
+        # Ensure the result is properly structured
+        if 'category' not in result:
+            logger.warning(f"Missing 'category' in classification result: {result}")
+            # Provide a default result with expected structure
+            return {
+                "category": "OTHERS",
+                "confidence": 0.9,
+                "uncertainty_points": ["Missing proper classification"],
+                "rationale": "Failed to extract proper classification from model response"
+            }
+        
+        return result
     async def retrieve_related_context(self, email_body, email_subject, sender_email, recipients, uncertainties=None):
         """Retrieve relevant context using field-specific embeddings with improved performance."""
         try:
@@ -420,7 +399,7 @@ class EmailClassificationService:
             for field_name, content in fields_to_search[:3]:
                 try:
                     # Generate embedding and query
-                    embedding = self.embeddings.embed_query(content)
+                    embedding = self.embeddings.get_embedding(content)
                     query_response = self.pinecone_index.query(
                         namespace="email_embeddings",
                         vector=embedding,
