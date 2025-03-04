@@ -1,11 +1,11 @@
 from fastapi.params import Param
 from .email_classification_service import EmailClassificationService
-from .email_classification_model import EmailClassification
+# from .email_classification_model import EmailClassification
 from nest.core import Controller, Get, Post, Injectable
 from typing import Optional
 from celery.result import AsyncResult
-from utils.celery_config import celery_app
-from utils.tasks import classify_email_batch
+from src.celery.celery_config import celery_app
+from src.email_classification.tasks import classify_email_batch
 from src.database.mongodb import MongoDB
 from fastapi import HTTPException, BackgroundTasks, Query
 import logging

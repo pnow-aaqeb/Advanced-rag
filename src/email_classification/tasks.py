@@ -1,8 +1,8 @@
 # tasks.py
-from utils.celery_config import celery_app
+from src.celery.celery_config import celery_app
 from prisma import Prisma
 from openai import AsyncOpenAI
-from src.email_classification.email_classification_service import EmailClassificationService
+from .email_classification_service import EmailClassificationService
 import os
 import logging
 import asyncio
